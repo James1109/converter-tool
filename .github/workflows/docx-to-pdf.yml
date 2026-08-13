@@ -70,6 +70,18 @@ jobs:
           # 安裝 Google 的 Noto CJK 字型（涵蓋繁體中文、簡體中文、
           # 日文、韓文），讓 LibreOffice 有真正的中文字形可以畫。
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          # ⭐ 修正「內容跑到下一頁、跟 Word 分頁位置對不齊」的殘留落差 ⭐
+          # 文件實際指定的西文字型是 Calibri、標題字型是 Cambria——這兩個
+          # 都是微軟的授權字型，沒辦法透過 apt 免費安裝正版。但 LibreOffice
+          # 本身內建一份「metric-compatible」字型替換表：只要系統裡有
+          # Carlito（跟 Calibri 逐字寬完全相同，只有筆畫細節不同）、
+          # Caladea（跟 Cambria 逐字寬相同），就會自動拿來替換 Calibri/
+          # Cambria，寬度算出來的結果會跟 Word 用 Calibri/Cambria 排版
+          # 幾乎一致，不會再因為「隨便換成某個寬度不同的字型」而讓斷行
+          # 位置跟著跑掉。沒裝這兩個字型的話，LibreOffice 會退而求其次
+          # 換成寬度不保證一致的字型，這正是先前「http 那一行跑到第二頁」
+          # 的殘留落差來源之一。
+          sudo apt-get install -y --no-install-recommends fonts-crosextra-carlito fonts-crosextra-caladea
           # 字型快取重建，確保 LibreOffice 啟動時抓得到新裝的字型。
           sudo fc-cache -f -v
 
