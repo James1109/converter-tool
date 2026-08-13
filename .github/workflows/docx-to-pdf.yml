@@ -1,0 +1,81 @@
+# =============================================================================
+# docx-to-pdf.yml
+# =============================================================================
+# 【這個檔案的定位】
+# 「進階轉檔（GitHub Actions + LibreOffice）」功能的後端本體。使用者
+# 把整個 repo Fork 到自己帳號底下之後，這份工作流程檔案會跟著一起
+# 複製過去，不需要額外安裝任何東西——GitHub 本身就會依這份設定跑。
+#
+# 【觸發方式】
+# 監聽 incoming/ 目錄下有新檔案被 push 進來（前端透過 GitHub Contents
+# API，用使用者自己的 Personal Access Token 上傳檔案到這個路徑，這個
+# push 動作本身就會自動觸發這份工作流程，不需要額外呼叫
+# workflow_dispatch，前端邏輯可以更單純）。
+#
+# 【流程】
+# 1. checkout 使用者自己 Fork 出來的 repo
+# 2. 安裝 LibreOffice（GitHub 提供的 ubuntu-latest 執行環境本身沒有
+#    預先裝好，這一步大約需要 30-60 秒）
+# 3. 用 `soffice --headless --convert-to pdf` 把 incoming/ 底下的檔案
+#    轉成 PDF，輸出到 outgoing/
+# 4. 把轉檔結果 commit 回 repo 的 outgoing/ 目錄，並把用過的 incoming/
+#    來源檔案一併刪除（避免 incoming 目錄越堆越多垃圾）
+# 5. 前端透過輪詢 outgoing/ 目錄，偵測到結果檔案出現就下載
+#
+# 【已知取捨，使用者應該知道的事】
+# - 每次轉檔都是一次真正的 git commit，repo 的版本紀錄會隨著使用次數
+#   增長。如果很在意這件事，可以定期手動清理/重寫這個 repo 的歷史紀錄
+#   （例如用 git rebase 或直接重新 Fork 一份新的），這份工作流程本身
+#   不會自動幫你清。
+# - 免費額度：公開 repo 的 GitHub Actions 用量通常有相當充足的免費
+#   額度，但仍屬於使用者自己帳號的額度，用量請自行留意 GitHub 帳號的
+#   Actions 使用狀況頁面。
+# - 速度：每次轉檔都是全新開一台虛擬機、重新安裝 LibreOffice，單次
+#   大約需要 30 秒到 2 分鐘不等，不是即時的。
+# =============================================================================
+
+name: docx-to-pdf
+
+on:
+  push:
+    paths:
+      - 'incoming/**'
+
+# 需要能夠把轉檔結果 commit 回這個 repo。
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    # 避免這份工作流程自己 commit 轉檔結果時，又觸發自己一次無窮迴圈
+    # ——用 commit 訊息裡的固定標記字串來判斷是不是自己產生的 commit。
+    if: "!contains(github.event.head_commit.message, '[docx-to-pdf-bot]')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LibreOffice
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+
+      - name: Convert incoming files to PDF
+        run: |
+          mkdir -p outgoing
+          shopt -s nullglob
+          for f in incoming/*.docx incoming/*.doc incoming/*.odt; do
+            [ -e "$f" ] || continue
+            echo "Converting: $f"
+            soffice --headless --norestore --convert-to pdf --outdir outgoing "$f"
+          done
+
+      - name: Commit result and clean up source files
+        run: |
+          git config user.name "docx-to-pdf-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -rf --ignore-unmatch incoming
+          git add outgoing
+          git diff --cached --quiet && echo "No changes to commit" || \
+            git commit -m "[docx-to-pdf-bot] convert ${{ github.sha }}"
+          git push

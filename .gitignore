@@ -1,0 +1,3 @@
+# 本機設定檔——含真實 API Key/Token，只留在自己電腦，絕對不能 commit。
+# 詳見 local-config-loader.js 檔頭說明。
+config.local.js
