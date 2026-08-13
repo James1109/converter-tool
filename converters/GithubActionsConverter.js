@@ -216,7 +216,7 @@ export async function start(file, options) {
     EventBus_instance.emit('converter:result', {
       tool: 'gh-actions-document',
       blobUrl,
-      fileName: `${baseName}-完整還原.pdf`,
+      fileName: `${baseName}.pdf`,
       fileSizeBytes: pdfBlob.size,
     });
 
