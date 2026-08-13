@@ -59,6 +59,19 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends libreoffice-writer
+          # ⭐ 修正「輸出 PDF 中文字全部變成同一個字」的 bug ⭐
+          # GitHub 提供的 ubuntu-latest 環境預設完全沒有裝任何中文/CJK
+          # 字型。LibreOffice 遇到文件裡要求的字型（例如新細明體、
+          # 微軟正黑體）在系統裡找不到時，會靜默替換成隨便一個可用
+          # 字型，這個替換字型如果沒有對應的中文字形資料，轉出來的
+          # PDF 裡每個中文字就會被畫成同一個「缺字替代」符號——這正是
+          # 我們實測遇到的「整份文件的中文字全部變成『前』字」的成因，
+          # 不是轉檔邏輯錯誤，是執行環境缺字型。
+          # 安裝 Google 的 Noto CJK 字型（涵蓋繁體中文、簡體中文、
+          # 日文、韓文），讓 LibreOffice 有真正的中文字形可以畫。
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          # 字型快取重建，確保 LibreOffice 啟動時抓得到新裝的字型。
+          sudo fc-cache -f -v
 
       - name: Convert incoming files to PDF
         run: |
