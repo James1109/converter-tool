@@ -197,6 +197,37 @@ jobs:
               else
                 # pdf / html：LibreOffice 直接支援的單檔輸出格式。
                 soffice --headless --norestore --convert-to "$format" --outdir "outgoing/$format" "$f"
+
+                if [ "$format" = "html" ]; then
+                  out_html="outgoing/html/${task_id}.html"
+                  if [ -e "$out_html" ]; then
+                    # ⭐ 修正「HTML 貼齊左邊、鋪滿整個瀏覽器視窗寬度」的體驗問題 ⭐
+                    # LibreOffice 匯出的 HTML 本身沒有任何「限制內容寬度、
+                    # 置中顯示」的樣式，在寬螢幕瀏覽器裡打開會整段文字貼著
+                    # 最左邊、一路鋪到最右邊，跟一般看文件的體驗差很多。
+                    # 這裡在輸出的 <head> 結尾前插入一段 CSS，把內容限制在
+                    # 800px 寬、置中顯示，比較像正常閱讀一份文件的樣子；
+                    # 不去動 LibreOffice 自己產生的其他樣式規則，只是額外
+                    # 疊加一層版面容器樣式，不會影響原本的字型/顏色設定。
+                    python3 - "$out_html" <<'PYEOF'
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding='utf-8') as f:
+              html = f.read()
+
+          extra_style = '''<style type="text/css">
+            body { max-width: 800px; margin: 40px auto; padding: 0 24px; }
+          </style>
+          </head>'''
+
+          html = html.replace('</head>', extra_style, 1)
+
+          with open(path, 'w', encoding='utf-8') as f:
+              f.write(html)
+          PYEOF
+                  fi
+                fi
               fi
             done
           done
