@@ -90,7 +90,8 @@ jobs:
           mkdir -p outgoing
           shopt -s nullglob
 
-          # ⭐ 自動修正「表格被分頁攔腰截斷、頁尾多出空框」的問題 ⭐
+          # ⭐ 自動修正「表格被分頁攔腰截斷、頁尾多出空框」的問題，並嘗試
+          # 「緊排版」讓內容盡量留在原本的頁面，不要被整段推到下一頁 ⭐
           # Word 文件裡的表格列，如果沒有明確設定「不允許跨頁分行」
           # （<w:cantSplit/>），排版引擎（不管是 Word 還是 LibreOffice）
           # 遇到剛好卡在分頁點的表格列，預設就是允許把這一列攔腰拆成
@@ -99,9 +100,17 @@ jobs:
           # 都手動回 Word 裡逐一設定，這裡改成在轉檔前，用一個小 Python
           # 腳本直接在記憶體裡把 .docx（本質是 ZIP 檔）裡的
           # word/document.xml 打開，幫每一個表格列自動加上
-          # <w:cantSplit/>，強制表格整列留在同一頁，處理完再轉檔。
-          # 這樣使用者上傳原始、完全沒動過的 .docx 也能自動套用這個
-          # 修正，不需要自己先手動編輯過一次。
+          # <w:cantSplit/>，強制表格整列留在同一頁。
+          #
+          # 但加上 cantSplit 之後，如果整張表格加起來已經放不進當前頁面
+          # 剩餘的空間，引擎就只能把整張表格搬到下一頁——這是物理上的
+          # 必然（不能切開、又放不下，只剩「整張搬走」這個選項）。為了
+          # 盡量讓表格在搬走之前就已經放得下，這裡同時把
+          # word/styles.xml 裡的預設段落間距（w:spacing 的 w:after）
+          # 跟行距（w:line）都調緊一點，讓每一段落佔用的垂直空間變小，
+          # 騰出多一點空間給表格。這是「盡量湊進去」的務實作法，調整
+          # 幅度沒辦法保證一定能讓每一份文件都剛好放得下——放不放得下
+          # 終究要看這份文件實際內容的長度。
           python3 - <<'PYEOF'
           import glob
           import re
@@ -109,7 +118,7 @@ jobs:
           import shutil
           import os
 
-          def add_cant_split_to_docx(path):
+          def patch_docx(path):
               tmp_path = path + '.tmp'
               with zipfile.ZipFile(path, 'r') as zin:
                   names = zin.namelist()
@@ -118,37 +127,48 @@ jobs:
                   with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
                       for item in names:
                           data = zin.read(item)
+
                           if item == 'word/document.xml':
                               text = data.decode('utf-8')
-
-                              def patch_row(match):
-                                  row_tag = match.group(0)
-                                  # 找這個 <w:tr ...> 到下一個標籤之間，看看緊接著是不是
-                                  # 已經有 <w:trPr>，有的話把 cantSplit 插進去裡面；
-                                  # 沒有的話直接補一個新的 <w:trPr>。
-                                  return row_tag
-
-                              # 這份文件實測過的欄位（見對話紀錄）都沒有既有的
-                              # <w:trPr>，用最單純可靠的方式直接插入新標籤；已經有
-                              # <w:trPr> 的情況也不會被破壞，只是那種情況下這個正
-                              # 規表示式不會誤觸發（因為比對的是 <w:tr ...> 開頭本身，
-                              # 插入動作永遠緊接在它後面，不影響原本可能存在的
-                              # <w:trPr>，只是會產生兩個 trPr 相鄰——OOXML 對此有
-                              # 一定的容忍度，但保守起見仍建議來源文件本身沒有
-                              # trPr 時使用效果最穩定）。
+                              # 幫每個表格列加上 cantSplit，禁止表格被攔腰拆頁。
                               text, count = re.subn(
                                   r'<w:tr(?:\s[^>]*)?>',
                                   lambda m: m.group(0) + '<w:trPr><w:cantSplit/></w:trPr>',
                                   text,
                               )
-                              print(f'  {os.path.basename(path)}: 已處理 {count} 個表格列')
+                              print(f'  {os.path.basename(path)}: 已處理 {count} 個表格列（cantSplit）')
                               data = text.encode('utf-8')
+
+                          elif item == 'word/styles.xml':
+                              text = data.decode('utf-8')
+                              original_text = text
+                              # 把「文件預設段落間距/行距」調緊：w:after（段落
+                              # 後方留白，單位 1/20pt）調小、w:line（行距，
+                              # w:lineRule="auto" 時單位是 1/240 行高的比例）
+                              # 調成接近單行間距。只調 docDefaults 這個「全域
+                              # 預設值」，不去動個別段落自己明確指定的間距
+                              # （避免破壞使用者可能刻意設定過的段落樣式）。
+                              def tighten_spacing(match):
+                                  tag = match.group(0)
+                                  tag = re.sub(r'w:after="\d+"', 'w:after="60"', tag)
+                                  tag = re.sub(r'w:line="\d+"', 'w:line="240"', tag)
+                                  return tag
+
+                              text, count = re.subn(
+                                  r'<w:spacing\s+[^/]*/>',
+                                  tighten_spacing,
+                                  text,
+                              )
+                              if text != original_text:
+                                  print(f'  {os.path.basename(path)}: 已調緊 {count} 處預設段落間距')
+                              data = text.encode('utf-8')
+
                           zout.writestr(item, data)
               shutil.move(tmp_path, path)
 
           for path in glob.glob('incoming/*.docx'):
               try:
-                  add_cant_split_to_docx(path)
+                  patch_docx(path)
               except Exception as e:
                   print(f'  {path}: 前處理失敗（{e}），將直接轉換原始檔案，不中斷流程')
           PYEOF
