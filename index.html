@@ -664,6 +664,18 @@
           <input type="file" class="file-input hidden" accept=".docx,.doc,.odt" data-tool="gh-actions-document" />
         </div>
 
+        <div class="flex flex-wrap gap-4 text-sm items-center">
+          <label class="flex items-center gap-2">
+            目標格式
+            <select id="gh-target-format" class="border border-slate-300 rounded px-2 py-1">
+              <option value="pdf">PDF</option>
+              <option value="html">HTML（文字可選取複製）</option>
+              <option value="png">PNG 圖片（每頁一張，打包成 zip）</option>
+              <option value="jpg">JPG 圖片（每頁一張，打包成 zip）</option>
+            </select>
+          </label>
+        </div>
+
         <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" data-tool="gh-actions-document" disabled>
           開始進階轉檔
         </button>

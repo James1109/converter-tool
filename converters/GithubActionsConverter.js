@@ -71,15 +71,6 @@ async function fileToBase64(file) {
   return btoa(binary);
 }
 
-function base64ToBlob(base64, mimeType) {
-  const binary = atob(base64.replace(/\n/g, ''));
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mimeType });
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -120,18 +111,19 @@ async function uploadIncomingFile(owner, repo, branch, token, path, base64Conten
   }
 }
 
-async function pollForOutputFile(owner, repo, branch, token, path, onProgress) {
+async function pollForOutputFile(owner, repo, branch, token, dirPath, taskId, onProgress) {
   for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
     if (cancelRequested) throw new Error('已取消轉檔。');
 
     const response = await fetch(
-      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${branch}`,
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(dirPath)}?ref=${branch}`,
       { headers: authHeaders(token) }
     );
     if (response.status === 200) {
-      return response.json();
-    }
-    if (response.status !== 404) {
+      const items = await response.json();
+      const match = Array.isArray(items) ? items.find((item) => item.name.startsWith(`${taskId}.`)) : null;
+      if (match) return match;
+    } else if (response.status !== 404) {
       throw new Error(`查詢轉檔結果時發生錯誤（HTTP ${response.status}）。`);
     }
 
@@ -154,10 +146,17 @@ async function deleteFile(owner, repo, branch, token, path, sha) {
   }
 }
 
+const MIME_BY_EXT = {
+  pdf: 'application/pdf',
+  html: 'text/html',
+  zip: 'application/zip', // png/jpg 輸出是多頁圖片包成的 zip
+};
+
 /**
  * start(file, options)
  * -------------------------------------------------------------------------
- * options: { owner, repo, token }
+ * options: { owner, repo, token, targetFormat }
+ * targetFormat: 'pdf' | 'html' | 'png' | 'jpg'（省略時預設 'pdf'）
  * -------------------------------------------------------------------------
  */
 export async function start(file, options) {
@@ -166,6 +165,7 @@ export async function start(file, options) {
   const owner = (options.owner || '').trim();
   const repo = (options.repo || '').trim();
   const token = (options.token || '').trim();
+  const targetFormat = (options.targetFormat || 'pdf').trim().toLowerCase();
 
   if (!owner || !repo || !token) {
     emitError('請先填寫 GitHub 帳號、repo 名稱與 Personal Access Token 才能使用進階轉檔功能。');
@@ -195,33 +195,45 @@ export async function start(file, options) {
         : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const ext = (file.name.match(/\.[^.]+$/) || ['.docx'])[0];
     const baseName = file.name.replace(/\.[^.]+$/, '');
-    const incomingPath = `incoming/${uuid}${ext}`;
-    const outgoingPath = `outgoing/${uuid}.pdf`;
+    // 目標格式用「子資料夾名稱」表達，見 docx-to-pdf.yml 檔頭說明。
+    const incomingPath = `incoming/${targetFormat}/${uuid}${ext}`;
+    const outgoingDir = `outgoing/${targetFormat}`;
 
     emitProgress(15, '正在上傳檔案到 GitHub...');
     const base64Content = await fileToBase64(file);
     await uploadIncomingFile(owner, repo, branch, token, incomingPath, base64Content);
 
     emitProgress(25, 'GitHub Actions 已觸發，正在等待 LibreOffice 轉檔（通常需要 30 秒～2 分鐘）...');
-    const result = await pollForOutputFile(owner, repo, branch, token, outgoingPath, (attempt) => {
+    const match = await pollForOutputFile(owner, repo, branch, token, outgoingDir, uuid, (attempt) => {
       // 25% ~ 90% 之間依嘗試次數緩慢推進，讓使用者知道還在等，不是卡住。
       const percent = Math.min(90, 25 + (attempt / MAX_POLL_ATTEMPTS) * 65);
       emitProgress(percent, 'GitHub Actions 正在轉檔中，請耐心等候...');
     });
 
     emitProgress(95, '正在下載轉檔結果...');
-    const pdfBlob = base64ToBlob(result.content, 'application/pdf');
-    const blobUrl = URL.createObjectURL(pdfBlob);
+    const resultExt = (match.name.match(/\.[^.]+$/) || ['.pdf'])[0].slice(1);
+    const mimeType = MIME_BY_EXT[resultExt] || 'application/octet-stream';
 
+    // 用 download_url 直接抓原始內容（公開 repo 不需要額外帶 token 也能
+    // 讀到，比再打一次 contents API、自己解 base64 更單純直接）。
+    const fileResponse = await fetch(match.download_url);
+    if (!fileResponse.ok) {
+      throw new Error(`下載轉檔結果失敗（HTTP ${fileResponse.status}）。`);
+    }
+    const resultBlob = await fileResponse.blob();
+    const typedBlob = new Blob([resultBlob], { type: mimeType });
+    const blobUrl = URL.createObjectURL(typedBlob);
+
+    const outputSuffix = resultExt === 'zip' ? '-圖片' : '';
     EventBus_instance.emit('converter:result', {
       tool: 'gh-actions-document',
       blobUrl,
-      fileName: `${baseName}.pdf`,
-      fileSizeBytes: pdfBlob.size,
+      fileName: `${baseName}${outputSuffix}.${resultExt}`,
+      fileSizeBytes: typedBlob.size,
     });
 
     // 清理 GitHub 上的暫存輸出檔案（不影響已經下載到本機的結果）。
-    deleteFile(owner, repo, branch, token, outgoingPath, result.sha);
+    deleteFile(owner, repo, branch, token, match.path, match.sha);
   } catch (err) {
     console.error('[GithubActionsConverter] 轉檔失敗：', err);
     emitError(err && err.message ? err.message : '進階轉檔過程發生未知錯誤，請重新嘗試。');

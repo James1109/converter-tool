@@ -362,6 +362,7 @@ function collectOptionsForTool(tool) {
       owner: document.getElementById('gh-owner').value.trim(),
       repo: document.getElementById('gh-repo').value.trim(),
       token: document.getElementById('gh-token').value.trim(),
+      targetFormat: document.getElementById('gh-target-format').value,
     };
   }
   return {};

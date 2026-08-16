@@ -12,15 +12,26 @@
 # push 動作本身就會自動觸發這份工作流程，不需要額外呼叫
 # workflow_dispatch，前端邏輯可以更單純）。
 #
+# 【多種目標格式：用資料夾名稱表達「要轉成什麼」】
+# incoming/ 底下不是直接放檔案，而是依「目標格式」分子資料夾，例如
+# incoming/pdf/{任務ID}.docx、incoming/html/{任務ID}.docx、
+# incoming/png/{任務ID}.docx。這個資料夾名稱本身就是要傳給
+# `soffice --convert-to` 的目標格式，前端上傳檔案時只要決定好要放進
+# 哪個子資料夾，不需要另外傳遞任何額外參數，設計最單純。
+# 轉檔結果對應輸出到 outgoing/{格式}/ 底下，檔名開頭是同一個任務 ID，
+# 副檔名依實際輸出類型而定（pdf/html 是單一檔案；png/jpg 因為 Word
+# 文件可能有多頁、一次只能有一個圖檔，實際輸出是包含每一頁圖片的
+# {任務ID}.zip）。
+#
 # 【流程】
 # 1. checkout 使用者自己 Fork 出來的 repo
-# 2. 安裝 LibreOffice（GitHub 提供的 ubuntu-latest 執行環境本身沒有
-#    預先裝好，這一步大約需要 30-60 秒）
-# 3. 用 `soffice --headless --convert-to pdf` 把 incoming/ 底下的檔案
-#    轉成 PDF，輸出到 outgoing/
+# 2. 安裝 LibreOffice + 中文字型 + poppler-utils（png/jpg 輸出要用它
+#    的 pdftoppm 把 PDF 每一頁轉成圖片）
+# 3. 依 incoming/ 底下每個子資料夾（目標格式）分別轉檔
 # 4. 把轉檔結果 commit 回 repo 的 outgoing/ 目錄，並把用過的 incoming/
 #    來源檔案一併刪除（避免 incoming 目錄越堆越多垃圾）
-# 5. 前端透過輪詢 outgoing/ 目錄，偵測到結果檔案出現就下載
+# 5. 前端透過輪詢 outgoing/{格式}/ 目錄，偵測到以任務 ID 開頭的結果
+#    檔案出現就下載
 #
 # 【已知取捨，使用者應該知道的事】
 # - 每次轉檔都是一次真正的 git commit，repo 的版本紀錄會隨著使用次數
@@ -32,6 +43,8 @@
 #   Actions 使用狀況頁面。
 # - 速度：每次轉檔都是全新開一台虛擬機、重新安裝 LibreOffice，單次
 #   大約需要 30 秒到 2 分鐘不等，不是即時的。
+# - png/jpg 輸出是多頁圖片包成一個 zip，不是單張圖，前端下載後需要
+#   自己解壓縮。
 # =============================================================================
 
 name: docx-to-pdf
@@ -55,10 +68,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LibreOffice
+      - name: Install LibreOffice and tools
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          sudo apt-get install -y --no-install-recommends libreoffice-writer poppler-utils
           # ⭐ 修正「輸出 PDF 中文字全部變成同一個字」的 bug ⭐
           # GitHub 提供的 ubuntu-latest 環境預設完全沒有裝任何中文/CJK
           # 字型。LibreOffice 遇到文件裡要求的字型（例如新細明體、
@@ -85,32 +98,12 @@ jobs:
           # 字型快取重建，確保 LibreOffice 啟動時抓得到新裝的字型。
           sudo fc-cache -f -v
 
-      - name: Convert incoming files to PDF
+      - name: Preprocess docx (table page-break fix + tighter spacing)
         run: |
-          mkdir -p outgoing
-          shopt -s nullglob
-
           # ⭐ 自動修正「表格被分頁攔腰截斷、頁尾多出空框」的問題，並嘗試
           # 「緊排版」讓內容盡量留在原本的頁面，不要被整段推到下一頁 ⭐
-          # Word 文件裡的表格列，如果沒有明確設定「不允許跨頁分行」
-          # （<w:cantSplit/>），排版引擎（不管是 Word 還是 LibreOffice）
-          # 遇到剛好卡在分頁點的表格列，預設就是允許把這一列攔腰拆成
-          # 兩半、下半部分接到下一頁，看起來常常像是頁尾多了一個奇怪的
-          # 空框。這是文件本身表格設定的預設行為，但既然使用者不想每次
-          # 都手動回 Word 裡逐一設定，這裡改成在轉檔前，用一個小 Python
-          # 腳本直接在記憶體裡把 .docx（本質是 ZIP 檔）裡的
-          # word/document.xml 打開，幫每一個表格列自動加上
-          # <w:cantSplit/>，強制表格整列留在同一頁。
-          #
-          # 但加上 cantSplit 之後，如果整張表格加起來已經放不進當前頁面
-          # 剩餘的空間，引擎就只能把整張表格搬到下一頁——這是物理上的
-          # 必然（不能切開、又放不下，只剩「整張搬走」這個選項）。為了
-          # 盡量讓表格在搬走之前就已經放得下，這裡同時把
-          # word/styles.xml 裡的預設段落間距（w:spacing 的 w:after）
-          # 跟行距（w:line）都調緊一點，讓每一段落佔用的垂直空間變小，
-          # 騰出多一點空間給表格。這是「盡量湊進去」的務實作法，調整
-          # 幅度沒辦法保證一定能讓每一份文件都剛好放得下——放不放得下
-          # 終究要看這份文件實際內容的長度。
+          # 詳細原理說明見對話紀錄／README；這裡統一在轉檔前先處理過
+          # incoming/ 底下所有子資料夾裡的每一個 .docx。
           python3 - <<'PYEOF'
           import glob
           import re
@@ -123,31 +116,25 @@ jobs:
               with zipfile.ZipFile(path, 'r') as zin:
                   names = zin.namelist()
                   if 'word/document.xml' not in names:
-                      return  # 不是預期的 docx 結構，跳過，交給 LibreOffice 直接處理原檔
+                      return
                   with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
                       for item in names:
                           data = zin.read(item)
 
                           if item == 'word/document.xml':
                               text = data.decode('utf-8')
-                              # 幫每個表格列加上 cantSplit，禁止表格被攔腰拆頁。
                               text, count = re.subn(
                                   r'<w:tr(?:\s[^>]*)?>',
                                   lambda m: m.group(0) + '<w:trPr><w:cantSplit/></w:trPr>',
                                   text,
                               )
-                              print(f'  {os.path.basename(path)}: 已處理 {count} 個表格列（cantSplit）')
+                              print(f'  {path}: 已處理 {count} 個表格列（cantSplit）')
                               data = text.encode('utf-8')
 
                           elif item == 'word/styles.xml':
                               text = data.decode('utf-8')
                               original_text = text
-                              # 把「文件預設段落間距/行距」調緊：w:after（段落
-                              # 後方留白，單位 1/20pt）調小、w:line（行距，
-                              # w:lineRule="auto" 時單位是 1/240 行高的比例）
-                              # 調成接近單行間距。只調 docDefaults 這個「全域
-                              # 預設值」，不去動個別段落自己明確指定的間距
-                              # （避免破壞使用者可能刻意設定過的段落樣式）。
+
                               def tighten_spacing(match):
                                   tag = match.group(0)
                                   tag = re.sub(r'w:after="\d+"', 'w:after="60"', tag)
@@ -160,23 +147,58 @@ jobs:
                                   text,
                               )
                               if text != original_text:
-                                  print(f'  {os.path.basename(path)}: 已調緊 {count} 處預設段落間距')
+                                  print(f'  {path}: 已調緊 {count} 處預設段落間距')
                               data = text.encode('utf-8')
 
                           zout.writestr(item, data)
               shutil.move(tmp_path, path)
 
-          for path in glob.glob('incoming/*.docx'):
+          for path in glob.glob('incoming/**/*.docx', recursive=True):
               try:
                   patch_docx(path)
               except Exception as e:
                   print(f'  {path}: 前處理失敗（{e}），將直接轉換原始檔案，不中斷流程')
           PYEOF
 
-          for f in incoming/*.docx incoming/*.doc incoming/*.odt; do
-            [ -e "$f" ] || continue
-            echo "Converting: $f"
-            soffice --headless --norestore --convert-to pdf --outdir outgoing "$f"
+      - name: Convert incoming files
+        run: |
+          mkdir -p outgoing
+          shopt -s nullglob
+
+          # incoming/ 底下每個子資料夾名稱就是目標格式（pdf / html /
+          # png / jpg...），對應輸出到 outgoing/{同名格式}/。
+          for dir in incoming/*/; do
+            format=$(basename "$dir")
+            mkdir -p "outgoing/$format"
+
+            for f in "$dir"*.docx "$dir"*.doc "$dir"*.odt; do
+              [ -e "$f" ] || continue
+              task_id=$(basename "$f")
+              task_id="${task_id%.*}"
+              echo "Converting: $f -> $format"
+
+              if [ "$format" = "png" ] || [ "$format" = "jpg" ]; then
+                # png/jpg：Word 文件可能有多頁，LibreOffice 一次只能匯出
+                # 一張圖，所以先轉成 PDF，再用 pdftoppm 把每一頁各自轉成
+                # 圖片，最後打包成一個 zip 當作輸出（一頁的情況 zip 裡也
+                # 只會有一張圖，但格式維持一致，前端統一用解壓縮的方式
+                # 處理，不用另外判斷「這次是不是剛好只有一頁」）。
+                tmp_dir=$(mktemp -d)
+                soffice --headless --norestore --convert-to pdf --outdir "$tmp_dir" "$f"
+                pdf_file="$tmp_dir/$(basename "${f%.*}").pdf"
+                if [ -e "$pdf_file" ]; then
+                  img_ext="$format"
+                  [ "$format" = "jpg" ] && poppler_fmt="jpeg" || poppler_fmt="png"
+                  pdftoppm "-$poppler_fmt" -r 150 "$pdf_file" "$tmp_dir/page"
+                  (cd "$tmp_dir" && zip -q "$task_id.zip" page-*."$img_ext" 2>/dev/null || zip -q "$task_id.zip" page-*.jpg 2>/dev/null || zip -q "$task_id.zip" page-*.png 2>/dev/null)
+                  mv "$tmp_dir/$task_id.zip" "outgoing/$format/"
+                fi
+                rm -rf "$tmp_dir"
+              else
+                # pdf / html：LibreOffice 直接支援的單檔輸出格式。
+                soffice --headless --norestore --convert-to "$format" --outdir "outgoing/$format" "$f"
+              fi
+            done
           done
 
       - name: Commit result and clean up source files
@@ -188,3 +210,4 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" || \
             git commit -m "[docx-to-pdf-bot] convert ${{ github.sha }}"
           git push
+
