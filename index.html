@@ -11,7 +11,7 @@
   =========================================================================
 -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>純前端轉檔工具 | 圖片・PDF・影音</title>
+<title>本機轉檔所 | 圖片・PDF・影音</title>
 
 <!--
   =========================================================================
@@ -115,16 +115,34 @@
 
 <!-- Tailwind CSS：先使用 CDN 版本快速開發，正式上線前可考慮改用建置版本以避免 CDN 中斷風險 -->
 <script src="https://cdn.tailwindcss.com"></script>
+
+<!-- 顯示字體：Plus Jakarta Sans，取代 Tailwind 預設的系統字體堆疊，
+     幾何感、字距略緊，介面數字/程式碼相關內容仍交給系統等寬字體處理。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&display=swap" rel="stylesheet" />
+
 <script>
   // 自訂 Tailwind 主題延伸：讓「警告色」「阻擋色」在整份文件中語意統一，
   // 之後 UI 元件只要用 class="bg-warning" / "text-blocked" 就能對應到同一套色票。
+  //
+  // 配色說明：捨棄 Tailwind 預設的 blue-700 這種到處都看得到的「範本感」
+  // 藍色，改用一支飽和度較低、偏深的森林綠當作整份文件唯一的強調色
+  // （brand / brand-dark 分別對應一般狀態與 hover/active 狀態），
+  // 中性色統一用 zinc（偏黑，不偏藍），跟強調色放在一起比較沉穩、
+  // 不會有「AI 生成模板」的既視感。
   tailwind.config = {
     theme: {
       extend: {
+        fontFamily: {
+          sans: ["'Plus Jakarta Sans'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        },
         colors: {
           warning: '#B45309',   // 柔性警告（例：Chromium 300MB 提醒）
           blocked: '#B91C1C',   // 硬性阻擋（例：Safari 150MB / 行動端影音）
-          brand: '#1D4ED8',
+          brand: '#1E5A46',
+          'brand-dark': '#153F31',
+          'brand-soft': '#E7F0EC',
         },
       },
     },
@@ -137,6 +155,10 @@
      或牽涉到「防退進度條」動畫細節的部分，特意保留在 <style> 而非
      inline style，方便日後統一調整轉場時間。
      =================================================================== */
+
+  body {
+    font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  }
 
   /* 進度條的內部填充條，寬度會由 JS（ui-bridge.js）動態設定 style.width，
      這裡只負責過渡動畫的平滑度，讓 0.2%/秒 的偽裝節流視覺上不會顯得跳動。 */
@@ -153,7 +175,7 @@
 </style>
 </head>
 
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+<body class="bg-zinc-50 text-zinc-800 min-h-screen flex flex-col">
 
   <!-- =====================================================================
        區塊一：全域能力橫幅（Capability Banner）
@@ -179,14 +201,14 @@
   <!-- =====================================================================
        頁首
        ===================================================================== -->
-  <header class="border-b border-slate-200 bg-white">
-    <div class="max-w-4xl mx-auto px-4 py-5 flex items-center justify-between">
+  <header class="border-b border-zinc-200 bg-white">
+    <div class="max-w-4xl mx-auto px-4 py-6 flex items-center justify-between">
       <div>
-        <h1 class="text-xl font-bold tracking-tight">純前端轉檔工具</h1>
-        <p class="text-sm text-slate-500">100% 在你的瀏覽器裡執行，檔案不會上傳到任何伺服器</p>
+        <h1 class="text-2xl font-extrabold tracking-tight text-zinc-900">檔案工坊</h1>
+        <p class="text-sm text-zinc-500 mt-0.5">100% 在你的瀏覽器裡執行，檔案不會上傳到任何伺服器</p>
       </div>
       <!-- 靜默的字型快取狀態指示（僅在下載中/失敗時才會顯示文字，快取命中時完全不顯示） -->
-      <div id="font-status-indicator" class="is-hidden text-xs text-slate-500"></div>
+      <div id="font-status-indicator" class="is-hidden text-xs text-zinc-500"></div>
     </div>
   </header>
 
@@ -203,7 +225,7 @@
          並附上 title 提示文字說明原因（而非直接從 DOM 移除，
          保留可視性讓使用者知道「這個功能存在，但此裝置不支援」）。
     -->
-    <nav id="tool-tabs" class="flex gap-2 border-b border-slate-200" role="tablist" aria-label="轉檔功能選擇">
+    <nav id="tool-tabs" class="flex gap-2 border-b border-zinc-200" role="tablist" aria-label="轉檔功能選擇">
       <button
         type="button"
         class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-brand text-brand"
@@ -215,16 +237,25 @@
       </button>
       <button
         type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700"
+        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
         data-tool="document"
         role="tab"
         aria-selected="false"
       >
-        文件轉檔（PDF / Word / AI）
+        PDF 轉圖片
       </button>
       <button
         type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700"
+        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
+        data-tool="ai-document"
+        role="tab"
+        aria-selected="false"
+      >
+        AI 智慧處理 ✨
+      </button>
+      <button
+        type="button"
+        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
         data-tool="video"
         role="tab"
         aria-selected="false"
@@ -234,7 +265,7 @@
       </button>
       <button
         type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700"
+        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
         data-tool="audio"
         role="tab"
         aria-selected="false"
@@ -244,12 +275,12 @@
       </button>
       <button
         type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700"
+        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
         data-tool="gh-actions-document"
         role="tab"
         aria-selected="false"
       >
-        進階轉檔（GitHub）🔧
+        精準轉檔 ⚙️
       </button>
     </nav>
 
@@ -267,23 +298,23 @@
          ConverterOrchestrator 中再次確認，不可只依賴瀏覽器的 accept 篩選
          （因為使用者仍可能透過「所有檔案」選項繞過 accept 限制）。
     -->
-    <section id="dropzone-container" class="bg-white rounded-lg border border-slate-200 p-6">
+    <section id="dropzone-container" class="bg-white rounded-lg border border-zinc-200 p-6">
 
       <!-- ---- 圖片轉檔面板 ---- -->
       <div id="panel-image" class="tool-panel space-y-4" data-panel-for="image">
         <div
-          class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+          class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
           data-tool="image"
         >
-          <p class="text-slate-500 text-sm">拖曳圖片到此處，或點擊選擇檔案</p>
-          <p class="text-slate-400 text-xs mt-1">支援 JPG / PNG / WebP / HEIC 等常見格式</p>
+          <p class="text-zinc-500 text-sm">拖曳圖片到此處，或點擊選擇檔案</p>
+          <p class="text-zinc-400 text-xs mt-1">支援 JPG / PNG / WebP / HEIC 等常見格式</p>
           <input type="file" class="file-input hidden" accept="image/*" data-tool="image" />
         </div>
 
         <div class="flex flex-wrap gap-4 text-sm">
           <label class="flex items-center gap-2">
             輸出格式
-            <select id="image-output-format" class="border border-slate-300 rounded px-2 py-1">
+            <select id="image-output-format" class="border border-zinc-300 rounded px-2 py-1">
               <option value="jpeg">JPEG</option>
               <option value="png">PNG</option>
               <option value="webp">WebP</option>
@@ -292,54 +323,85 @@
           <label class="flex items-center gap-2">
             品質
             <input type="range" id="image-quality" min="10" max="100" value="80" step="5" />
-            <span id="image-quality-value" class="text-slate-500">80%</span>
+            <span id="image-quality-value" class="text-zinc-500">80%</span>
           </label>
         </div>
 
-        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" data-tool="image" disabled>
+        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="image" disabled>
           開始轉檔
         </button>
       </div>
 
       <!-- =====================================================================
-           ---- 文件轉檔面板（合併：標準轉檔 / AI 智慧處理）----
+           ---- PDF 轉圖片面板 ----
            =====================================================================
-           一個 tab（tool tab = 'document'）底下用「子模式切換」區分兩條
-           完全獨立的處理管線：
-             - 'standard'：走 PdfConverter（tool='document'，mammoth.js +
-               pdf-lib，PDF↔圖片 / Word→PDF，無需 API Key、不呼叫任何
-               第三方服務）
-             - 'ai'：走 AiDocumentConverter（tool='ai-document'，BYOK，
-               呼叫 Gemini/OpenAI）
-           兩者的 dropzone / start 按鈕都各自保留原本的 data-tool，
-           ui-bridge.js 既有的通用邏輯完全不用改；這裡只是多加一層
-           「兩個子區塊哪個要顯示」的畫面切換（initDocumentModeToggle()）。
+           tool='document'，走 PdfConverter（pdf.js 解析，純前端逐頁轉成
+           圖片，不需要 API Key、不呼叫任何第三方服務）。原本這裡還有
+           Word→PDF 的「標準轉檔」路徑，因為「精準轉檔」分頁（真正的
+           LibreOffice 引擎）在排版精確度上全面勝出，已經整個移除，
+           不再維護重複的兩條 Word→PDF 路徑。
       -->
       <div id="panel-document" class="tool-panel is-hidden space-y-4" data-panel-for="document">
+        <div
+          class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+          data-tool="document"
+        >
+          <p class="text-zinc-500 text-sm">拖曳 PDF 檔案到此處，或點擊選擇檔案</p>
+          <p class="text-zinc-400 text-xs mt-1">將 PDF 逐頁轉成圖片</p>
+          <input type="file" class="file-input hidden" accept=".pdf" data-tool="document" />
+        </div>
 
-        <!-- ---- 子模式切換 ---- -->
-        <div class="inline-flex rounded-lg border border-slate-200 p-1 bg-slate-50 text-sm">
-          <button type="button" id="document-mode-standard-btn" class="document-mode-btn px-3 py-1.5 rounded-md font-medium bg-white shadow-sm text-brand" data-mode="standard">
-            標準轉檔
-          </button>
-          <button type="button" id="document-mode-ai-btn" class="document-mode-btn px-3 py-1.5 rounded-md font-medium text-slate-500" data-mode="ai">
-            AI 智慧處理 ✨
-          </button>
+        <!-- 行動端限制提示：僅在行動端會由 ui-bridge.js 顯示，說明「僅開放 5MB 以內」 -->
+        <p id="document-mobile-limit-hint" class="is-hidden text-xs text-warning">
+          偵測到行動裝置：僅支援 5MB 以內的小型文件轉檔。
+        </p>
+
+        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="document" disabled>
+          開始轉檔
+        </button>
+      </div>
+
+      <!-- =====================================================================
+           ---- AI 智慧文件處理面板（BYOK）----
+           =====================================================================
+           .docx → mammoth.js 解析 → 依模式組合 Prompt → 呼叫使用者自備金鑰的
+           Gemini / OpenAI API → 輸出 PDF 或 HTML。所有邏輯都在
+           converters/AiDocumentConverter.js（core 層）。
+      -->
+      <div id="panel-ai-document" class="tool-panel is-hidden space-y-4" data-panel-for="ai-document">
+
+        <div class="bg-blue-50 border border-blue-200 text-xs text-blue-800 rounded-lg p-3">
+          🔒 你的 API Key 只會儲存在「這台裝置的瀏覽器」裡（localStorage），且只會直接送往你自己選擇的 AI 供應商官方端點，不會經過任何本站伺服器（本工具沒有伺服器）。
+        </div>
+
+        <!-- ---- 還沒有金鑰的使用者：3 分鐘免費申請教學 ---- -->
+        <div class="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-900 space-y-1.5">
+          <p class="font-semibold">還沒有 API Key？Google Gemini 提供免費額度，3 分鐘就能申請好：</p>
+          <ol class="list-decimal list-inside space-y-0.5">
+            <li>
+              前往
+              <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" class="underline font-medium">Google AI Studio（aistudio.google.com）</a>
+              並用 Google 帳號登入
+            </li>
+            <li>點擊畫面右上角的「Get API Key」→「Create API key」</li>
+            <li>複製產生的金鑰，貼回上方的 API Key 欄位即可，不需要信用卡</li>
+          </ol>
+          <p class="text-emerald-700">免費額度有每日/每分鐘的請求次數上限，超過時 Google 官方 API 會回傳額度不足的錯誤訊息，屆時可以等隔天額度重置，或改綁付費方案。</p>
         </div>
 
         <!-- ---- SmartArt 限制說明（可展開）----
              mammoth.js 只認得一般內嵌圖片，讀不懂 Word 的 SmartArt
              （組織圖/流程圖，本質是向量資料+排版演算法，不是點陣圖），
-             純前端架構下沒有辦法自動畫出來（詳見
-             docx-content-audit.js 檔頭說明）。這裡用 <details> 原生
-             收合元件呈現操作教學，不需要額外 JS 就能展開/收合。 -->
+             純前端架構下沒有辦法自動畫出來（詳見 docx-content-audit.js
+             檔頭說明）。這個限制只影響這個瀏覽器端 AI 面板；「精準轉檔」
+             走的是真正的 LibreOffice 引擎，可以正常處理 SmartArt。 -->
         <details class="border border-amber-200 bg-amber-50 rounded-lg text-xs text-amber-900">
           <summary class="cursor-pointer select-none px-3 py-2 font-medium">
             ⚠️ 文件裡有 SmartArt 圖表（組織圖/流程圖）？點此看處理方式
           </summary>
           <div class="px-3 pb-3 space-y-1.5">
-            <p>SmartArt 是向量資料格式，跟一般圖片（.png/.jpg）完全不同，目前的轉檔工具無法自動呈現 SmartArt，轉檔時這些圖表會被省略（並會在輸出內容裡加上提示）。一般內嵌的圖片不受影響，仍會正常轉換。</p>
-            <p class="font-medium">如果需要保留 SmartArt 內容，請先在 Word 裡手動處理一次：</p>
+            <p>SmartArt 是向量資料格式，跟一般圖片（.png/.jpg）完全不同，這個瀏覽器端 AI 處理無法自動呈現 SmartArt，轉檔時這些圖表的畫面會被省略（文字內容仍會整理成附錄保留）。想要圖形本身完整還原，改用「精準轉檔 ⚙️」分頁即可，那邊用的是真正的 LibreOffice 引擎，可以正常處理 SmartArt。</p>
+            <p class="font-medium">如果想在這個 AI 面板裡也保留 SmartArt 圖形本身，請先在 Word 裡手動處理一次：</p>
             <ol class="list-decimal list-inside space-y-0.5">
               <li>在 Word 裡點選該 SmartArt 圖表</li>
               <li>滑鼠右鍵 →「另存為圖片」（或先「複製」，再「選擇性貼上」→「圖片」貼回原本位置，取代原本的 SmartArt）</li>
@@ -348,154 +410,89 @@
           </div>
         </details>
 
-        <!-- ================= 子區塊一：標準轉檔（PDF↔圖片 / Word→PDF）================= -->
-        <div id="document-mode-standard" class="space-y-4">
-          <div
-            class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
-            data-tool="document"
-          >
-            <p class="text-slate-500 text-sm">拖曳 PDF 或 Word 檔案到此處，或點擊選擇檔案</p>
-            <p class="text-slate-400 text-xs mt-1">支援：PDF 轉圖片、Word (.docx) 轉 PDF（僅支援 .docx，不支援舊版 .doc）</p>
-            <p class="text-slate-400 text-xs">⚠️ 輸出的 PDF 為排版截圖、單一長頁格式（文字無法反白選取／複製，也不會完全比照 Word 原始的分頁方式），AI 智慧處理模式若選擇 PDF 輸出也是同樣性質；若需要可複製文字的內容，AI 智慧處理模式可改選 HTML 輸出格式</p>
-            <input type="file" class="file-input hidden" accept=".pdf,.docx" data-tool="document" />
-          </div>
-
-          <!-- 行動端限制提示：僅在行動端會由 ui-bridge.js 顯示，說明「僅開放 5MB 以內」 -->
-          <p id="document-mobile-limit-hint" class="is-hidden text-xs text-warning">
-            偵測到行動裝置：僅支援 5MB 以內的小型文件轉檔。
-          </p>
-
-          <div class="flex flex-wrap gap-4 text-sm items-center">
-            <label class="flex items-center gap-2">
-              來源格式
-              <select id="document-source-format" class="border border-slate-300 rounded px-2 py-1">
-                <option value="pdf">PDF</option>
-                <option value="docx">Word（.docx）</option>
-              </select>
+        <!-- ---- BYOK 金鑰設定區 ---- -->
+        <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+          <h3 class="text-sm font-semibold text-zinc-700">AI 供應商設定</h3>
+          <p class="text-xs text-zinc-500">目前支援：<span class="font-medium text-zinc-700">Google Gemini</span>、<span class="font-medium text-zinc-700">OpenAI</span>。貼上你的 API Key 後，系統會自動判斷是哪一家、直接呼叫對應官方端點，不需要另外選擇。</p>
+          <div class="flex flex-wrap gap-4 text-sm items-end">
+            <label class="flex-1 min-w-[220px] flex items-center gap-2">
+              API Key
+              <input
+                type="password"
+                id="ai-api-key"
+                placeholder="貼上你的 API Key"
+                class="border border-zinc-300 rounded px-2 py-1 flex-1"
+                autocomplete="off"
+              />
             </label>
-            <span class="text-slate-400">→</span>
-            <label class="flex items-center gap-2">
-              目標格式
-              <select id="document-target-format" class="border border-slate-300 rounded px-2 py-1">
-                <!-- 選項由 ui-bridge.js 依「來源格式」動態產生，見 initDocumentFormatSelectors() -->
-              </select>
+            <label class="flex items-center gap-1.5 text-zinc-500 text-xs whitespace-nowrap">
+              <input type="checkbox" id="ai-remember-key" />
+              記住金鑰（存於本機）
             </label>
           </div>
-          <p class="text-xs text-slate-400">目前每種來源格式僅支援一種目標格式；未來會依需求擴充更多組合。</p>
-
-          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" data-tool="document" disabled>
-            開始轉檔
-          </button>
+          <p id="ai-key-detect-hint" class="text-xs font-medium"></p>
+          <p id="ai-key-status-hint" class="text-xs text-zinc-400"></p>
         </div>
 
-        <!-- ================= 子區塊二：AI 智慧處理（BYOK）================= -->
-        <div id="document-mode-ai" class="is-hidden space-y-4">
+        <!-- ---- 檔案拖曳區 ---- -->
+        <div
+          class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+          data-tool="ai-document"
+        >
+          <p class="text-zinc-500 text-sm">拖曳 Word (.docx) 檔案到此處，或點擊選擇檔案</p>
+          <p class="text-zinc-400 text-xs mt-1">AI 會依你選擇的模式處理內容，最終輸出為排版好的 PDF</p>
+          <input type="file" class="file-input hidden" accept=".docx" data-tool="ai-document" />
+        </div>
 
-          <div class="bg-blue-50 border border-blue-200 text-xs text-blue-800 rounded-lg p-3">
-            🔒 你的 API Key 只會儲存在「這台裝置的瀏覽器」裡（localStorage），且只會直接送往你自己選擇的 AI 供應商官方端點，不會經過任何本站伺服器（本工具沒有伺服器）。
-          </div>
-
-          <!-- ---- 還沒有金鑰的使用者：3 分鐘免費申請教學 ---- -->
-          <div class="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-900 space-y-1.5">
-            <p class="font-semibold">還沒有 API Key？Google Gemini 提供免費額度，3 分鐘就能申請好：</p>
-            <ol class="list-decimal list-inside space-y-0.5">
-              <li>
-                前往
-                <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" class="underline font-medium">Google AI Studio（aistudio.google.com）</a>
-                並用 Google 帳號登入
-              </li>
-              <li>點擊畫面右上角的「Get API Key」→「Create API key」</li>
-              <li>複製產生的金鑰，貼回上方的 API Key 欄位即可，不需要信用卡</li>
-            </ol>
-            <p class="text-emerald-700">免費額度有每日/每分鐘的請求次數上限，超過時 Google 官方 API 會回傳額度不足的錯誤訊息，屆時可以等隔天額度重置，或改綁付費方案。</p>
-          </div>
-
-          <!-- ---- BYOK 金鑰設定區 ---- -->
-          <div class="border border-slate-200 rounded-lg p-4 space-y-3">
-            <h3 class="text-sm font-semibold text-slate-700">AI 供應商設定</h3>
-            <p class="text-xs text-slate-500">目前支援：<span class="font-medium text-slate-700">Google Gemini</span>、<span class="font-medium text-slate-700">OpenAI</span>。貼上你的 API Key 後，系統會自動判斷是哪一家、直接呼叫對應官方端點，不需要另外選擇。</p>
-            <div class="flex flex-wrap gap-4 text-sm items-end">
-              <label class="flex-1 min-w-[220px] flex items-center gap-2">
-                API Key
-                <input
-                  type="password"
-                  id="ai-api-key"
-                  placeholder="貼上你的 API Key"
-                  class="border border-slate-300 rounded px-2 py-1 flex-1"
-                  autocomplete="off"
-                />
-              </label>
-              <label class="flex items-center gap-1.5 text-slate-500 text-xs whitespace-nowrap">
-                <input type="checkbox" id="ai-remember-key" />
-                記住金鑰（存於本機）
-              </label>
-            </div>
-            <p id="ai-key-detect-hint" class="text-xs font-medium"></p>
-            <p id="ai-key-status-hint" class="text-xs text-slate-400"></p>
-
-
-          </div>
-
-          <!-- ---- 檔案拖曳區 ---- -->
-          <div
-            class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
-            data-tool="ai-document"
-          >
-            <p class="text-slate-500 text-sm">拖曳 Word (.docx) 檔案到此處，或點擊選擇檔案</p>
-            <p class="text-slate-400 text-xs mt-1">AI 會依你選擇的模式處理內容，最終輸出為排版好的 PDF</p>
-            <input type="file" class="file-input hidden" accept=".docx" data-tool="ai-document" />
-          </div>
-
-          <!-- ---- 三大處理模式 ---- -->
-          <div class="border border-slate-200 rounded-lg p-4 space-y-3">
-            <h3 class="text-sm font-semibold text-slate-700">處理模式</h3>
-            <div class="space-y-2 text-sm">
-              <label class="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="ai-mode" value="lossless" checked class="mt-1" />
-                <span>
-                  <span class="font-medium">完整忠實轉寫（無損）</span>
-                  <span class="block text-xs text-slate-500">僅做格式美化與結構化，絕不刪減或修改任何原始文字。</span>
-                </span>
-              </label>
-              <label class="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="ai-mode" value="polish" class="mt-1" />
-                <span>
-                  <span class="font-medium">AI 智慧整理與修飾</span>
-                  <span class="block text-xs text-slate-500">自動修正錯別字、潤飾語句，整理成排版優美的結構化報告。</span>
-                </span>
-              </label>
-              <label class="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="ai-mode" value="custom" class="mt-1" />
-                <span>
-                  <span class="font-medium">自訂提示詞</span>
-                  <span class="block text-xs text-slate-500">自行輸入指令，例如：翻譯成英文、摘要條列、提取合約重點等。</span>
-                </span>
-              </label>
-            </div>
-
-            <textarea
-              id="ai-custom-prompt"
-              class="is-hidden w-full border border-slate-300 rounded px-3 py-2 text-sm"
-              rows="3"
-              placeholder="輸入你想要 AI 執行的指令，例如：請將這份文件翻譯成英文，並保留原本的段落結構。"
-            ></textarea>
-          </div>
-
-          <!-- ---- 輸出格式 ---- -->
-          <div class="flex flex-wrap gap-4 text-sm items-center">
-            <label class="flex items-center gap-2">
-              輸出格式
-              <select id="ai-output-format" class="border border-slate-300 rounded px-2 py-1">
-                <option value="pdf">PDF（排版截圖，適合列印/分享，文字無法選取複製）</option>
-                <option value="html">HTML（純網頁檔，文字可選取複製，用瀏覽器開啟）</option>
-              </select>
+        <!-- ---- 三大處理模式 ---- -->
+        <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+          <h3 class="text-sm font-semibold text-zinc-700">處理模式</h3>
+          <div class="space-y-2 text-sm">
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="ai-mode" value="lossless" checked class="mt-1" />
+              <span>
+                <span class="font-medium">完整忠實轉寫（無損）</span>
+                <span class="block text-xs text-zinc-500">僅做格式美化與結構化，絕不刪減或修改任何原始文字。</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="ai-mode" value="polish" class="mt-1" />
+              <span>
+                <span class="font-medium">AI 智慧整理與修飾</span>
+                <span class="block text-xs text-zinc-500">自動修正錯別字、潤飾語句，整理成排版優美的結構化報告。</span>
+              </span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input type="radio" name="ai-mode" value="custom" class="mt-1" />
+              <span>
+                <span class="font-medium">自訂提示詞</span>
+                <span class="block text-xs text-zinc-500">自行輸入指令，例如：翻譯成英文、摘要條列、提取合約重點等。</span>
+              </span>
             </label>
           </div>
 
-          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" data-tool="ai-document" disabled>
-            開始 AI 處理
-          </button>
+          <textarea
+            id="ai-custom-prompt"
+            class="is-hidden w-full border border-zinc-300 rounded px-3 py-2 text-sm"
+            rows="3"
+            placeholder="輸入你想要 AI 執行的指令，例如：請將這份文件翻譯成英文，並保留原本的段落結構。"
+          ></textarea>
         </div>
+
+        <!-- ---- 輸出格式 ---- -->
+        <div class="flex flex-wrap gap-4 text-sm items-center">
+          <label class="flex items-center gap-2">
+            輸出格式
+            <select id="ai-output-format" class="border border-zinc-300 rounded px-2 py-1">
+              <option value="pdf">PDF（排版截圖，適合列印/分享，文字無法選取複製）</option>
+              <option value="html">HTML（純網頁檔，文字可選取複製，用瀏覽器開啟）</option>
+            </select>
+          </label>
+        </div>
+
+        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="ai-document" disabled>
+          開始 AI 處理
+        </button>
       </div>
 
       <!-- ---- 影音轉檔面板 ---- -->
@@ -514,11 +511,11 @@
 
         <div id="video-dropzone-wrapper">
           <div
-            class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+            class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
             data-tool="video"
           >
-            <p class="text-slate-500 text-sm">拖曳影片到此處，或點擊選擇檔案</p>
-            <p class="text-slate-400 text-xs mt-1">支援 MP4 / MOV / WebM 等常見格式</p>
+            <p class="text-zinc-500 text-sm">拖曳影片到此處，或點擊選擇檔案</p>
+            <p class="text-zinc-400 text-xs mt-1">支援 MP4 / MOV / WebM 等常見格式</p>
             <input type="file" class="file-input hidden" accept="video/*" data-tool="video" />
           </div>
 
@@ -534,7 +531,7 @@
           <div class="flex flex-wrap gap-4 text-sm mt-4">
             <label class="flex items-center gap-2">
               輸出格式
-              <select id="video-output-format" class="border border-slate-300 rounded px-2 py-1">
+              <select id="video-output-format" class="border border-zinc-300 rounded px-2 py-1">
                 <option value="mp4">MP4</option>
                 <option value="webm">WebM</option>
                 <option value="gif">GIF（短片段）</option>
@@ -542,7 +539,7 @@
             </label>
           </div>
 
-          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed mt-2" data-tool="video" disabled>
+          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed mt-2" data-tool="video" disabled>
             開始轉檔
           </button>
         </div>
@@ -563,18 +560,18 @@
 
         <div id="audio-dropzone-wrapper">
           <div
-            class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+            class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
             data-tool="audio"
           >
-            <p class="text-slate-500 text-sm">拖曳音訊或影片檔案到此處，或點擊選擇檔案</p>
-            <p class="text-slate-400 text-xs mt-1">支援 MP3 / WAV / OGG 等音訊格式，也支援直接從影片檔案（MP4 等）擷取音軌</p>
+            <p class="text-zinc-500 text-sm">拖曳音訊或影片檔案到此處，或點擊選擇檔案</p>
+            <p class="text-zinc-400 text-xs mt-1">支援 MP3 / WAV / OGG 等音訊格式，也支援直接從影片檔案（MP4 等）擷取音軌</p>
             <input type="file" class="file-input hidden" accept="audio/*,video/*" data-tool="audio" />
           </div>
 
           <div class="flex flex-wrap gap-4 text-sm mt-4">
             <label class="flex items-center gap-2">
               輸出格式
-              <select id="audio-output-format" class="border border-slate-300 rounded px-2 py-1">
+              <select id="audio-output-format" class="border border-zinc-300 rounded px-2 py-1">
                 <option value="mp3">MP3</option>
                 <option value="wav">WAV（無損）</option>
                 <option value="ogg">OGG</option>
@@ -582,23 +579,23 @@
             </label>
             <label class="flex items-center gap-2">
               位元率
-              <select id="audio-bitrate" class="border border-slate-300 rounded px-2 py-1">
+              <select id="audio-bitrate" class="border border-zinc-300 rounded px-2 py-1">
                 <option value="128k">128 kbps</option>
                 <option value="192k" selected>192 kbps</option>
                 <option value="320k">320 kbps</option>
               </select>
-              <span class="text-slate-400 text-xs">（WAV 為無損格式，此選項會被忽略）</span>
+              <span class="text-zinc-400 text-xs">（WAV 為無損格式，此選項會被忽略）</span>
             </label>
           </div>
 
-          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed mt-2" data-tool="audio" disabled>
+          <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed mt-2" data-tool="audio" disabled>
             開始轉檔
           </button>
         </div>
       </div>
 
       <!-- =====================================================================
-           ---- 進階轉檔面板（GitHub Actions + LibreOffice）----
+           ---- 精準轉檔面板（GitHub Actions + LibreOffice）----
            =====================================================================
            跟其他分頁不同：實際轉檔運算完全發生在使用者自己的 GitHub
            Actions 虛擬機器上（跑真正的 LibreOffice），本機只負責透過
@@ -612,17 +609,17 @@
           🔒 這裡填的 GitHub Token 只會存在這台裝置的瀏覽器裡，並且只會直接送往 GitHub 官方 API，不會經過本站任何伺服器。強烈建議申請 Token 時，把權限範圍限縮到「只能存取你自己這個 repo 的內容」，不要給予帳號其他多餘的權限。
         </div>
 
-        <details class="border border-slate-200 rounded-lg text-xs text-slate-600" open>
-          <summary class="cursor-pointer select-none px-3 py-2 font-medium text-slate-700">
+        <details class="border border-zinc-200 rounded-lg text-xs text-zinc-600" open>
+          <summary class="cursor-pointer select-none px-3 py-2 font-medium text-zinc-700">
             🛠️ 第一次使用？先完成這兩個一次性設定（點此展開步驟）
           </summary>
           <div class="px-3 pb-3 space-y-3">
             <div>
-              <p class="font-medium text-slate-700">步驟一：Fork 這個專案到你自己的帳號</p>
+              <p class="font-medium text-zinc-700">步驟一：Fork 這個專案到你自己的帳號</p>
               <p>在 GitHub 上開啟本專案的頁面，點右上角「Fork」，複製一份到你自己的帳號底下（這一步是一次性的，之後轉檔都用這個 Fork 出來的 repo）。</p>
             </div>
             <div>
-              <p class="font-medium text-slate-700">步驟二：申請一組權限縮小範圍的 Personal Access Token</p>
+              <p class="font-medium text-zinc-700">步驟二：申請一組權限縮小範圍的 Personal Access Token</p>
               <p>前往 GitHub 「Settings → Developer settings → Personal access tokens → Fine-grained tokens」，建立新 Token 時：</p>
               <ul class="list-disc list-inside">
                 <li>Repository access 選「Only select repositories」，只勾選你剛剛 Fork 出來的那一個</li>
@@ -633,22 +630,22 @@
           </div>
         </details>
 
-        <div class="border border-slate-200 rounded-lg p-4 space-y-3">
-          <h3 class="text-sm font-semibold text-slate-700">GitHub 設定</h3>
+        <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+          <h3 class="text-sm font-semibold text-zinc-700">GitHub 設定</h3>
           <div class="flex flex-wrap gap-4 text-sm items-end">
             <label class="flex items-center gap-2">
               GitHub 帳號
-              <input type="text" id="gh-owner" placeholder="例如 octocat" class="border border-slate-300 rounded px-2 py-1" autocomplete="off" />
+              <input type="text" id="gh-owner" placeholder="例如 octocat" class="border border-zinc-300 rounded px-2 py-1" autocomplete="off" />
             </label>
             <label class="flex items-center gap-2">
               Repo 名稱
-              <input type="text" id="gh-repo" placeholder="Fork 出來的 repo 名稱" class="border border-slate-300 rounded px-2 py-1" autocomplete="off" />
+              <input type="text" id="gh-repo" placeholder="Fork 出來的 repo 名稱" class="border border-zinc-300 rounded px-2 py-1" autocomplete="off" />
             </label>
             <label class="flex-1 min-w-[220px] flex items-center gap-2">
               Personal Access Token
-              <input type="password" id="gh-token" placeholder="貼上你的 Token" class="border border-slate-300 rounded px-2 py-1 flex-1" autocomplete="off" />
+              <input type="password" id="gh-token" placeholder="貼上你的 Token" class="border border-zinc-300 rounded px-2 py-1 flex-1" autocomplete="off" />
             </label>
-            <label class="flex items-center gap-1.5 text-slate-500 text-xs whitespace-nowrap">
+            <label class="flex items-center gap-1.5 text-zinc-500 text-xs whitespace-nowrap">
               <input type="checkbox" id="gh-remember" />
               記住設定（存於本機）
             </label>
@@ -656,18 +653,18 @@
         </div>
 
         <div
-          class="dropzone border-2 border-dashed border-slate-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
+          class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
           data-tool="gh-actions-document"
         >
-          <p class="text-slate-500 text-sm">拖曳 Word (.docx) 檔案到此處，或點擊選擇檔案</p>
-          <p class="text-slate-400 text-xs mt-1">用真正的 LibreOffice 排版引擎完整轉換（含 SmartArt），單檔上限 20MB；轉檔通常需要 30 秒～2 分鐘，請耐心等候</p>
+          <p class="text-zinc-500 text-sm">拖曳 Word (.docx) 檔案到此處，或點擊選擇檔案</p>
+          <p class="text-zinc-400 text-xs mt-1">用真正的 LibreOffice 排版引擎完整轉換（含 SmartArt），單檔上限 20MB；轉檔通常需要 30 秒～2 分鐘，請耐心等候</p>
           <input type="file" class="file-input hidden" accept=".docx,.doc,.odt" data-tool="gh-actions-document" />
         </div>
 
         <div class="flex flex-wrap gap-4 text-sm items-center">
           <label class="flex items-center gap-2">
             目標格式
-            <select id="gh-target-format" class="border border-slate-300 rounded px-2 py-1">
+            <select id="gh-target-format" class="border border-zinc-300 rounded px-2 py-1">
               <option value="pdf">PDF</option>
               <option value="html">HTML（文字可選取複製）</option>
               <option value="png">PNG 圖片（每頁一張，打包成 zip）</option>
@@ -676,8 +673,8 @@
           </label>
         </div>
 
-        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed" data-tool="gh-actions-document" disabled>
-          開始進階轉檔
+        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="gh-actions-document" disabled>
+          開始精準轉檔
         </button>
       </div>
 
@@ -690,12 +687,12 @@
          UI 本身不做任何「單調遞增檢查」或「90%後偽裝節流」的計算，
          那些邏輯必須全部留在 core 端；這裡只負責「core 說 25% 我就顯示 25%」。
     -->
-    <section id="progress-section" class="is-hidden bg-white rounded-lg border border-slate-200 p-6">
+    <section id="progress-section" class="is-hidden bg-white rounded-lg border border-zinc-200 p-6">
       <div class="flex items-center justify-between mb-2">
-        <span id="progress-text" class="text-sm font-medium text-slate-700">正在處理中... (0%)</span>
-        <button type="button" id="progress-cancel-btn" class="text-xs text-slate-400 hover:text-blocked">取消</button>
+        <span id="progress-text" class="text-sm font-medium text-zinc-700">正在處理中... (0%)</span>
+        <button type="button" id="progress-cancel-btn" class="text-xs text-zinc-400 hover:text-blocked">取消</button>
       </div>
-      <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+      <div class="w-full h-2 bg-zinc-100 rounded-full overflow-hidden">
         <div id="progress-bar-fill" class="h-full bg-brand rounded-full" style="width: 0%"></div>
       </div>
     </section>
@@ -710,14 +707,14 @@
          實際的 URL.revokeObjectURL() 呼叫時機由 WorkerLifecycle 規則控制
          （圖片/文件：下載觸發後立即釋放；影音：配合 3 分鐘延遲銷毀機制）。
     -->
-    <section id="result-section" class="is-hidden bg-white rounded-lg border border-slate-200 p-6 space-y-3">
+    <section id="result-section" class="is-hidden bg-white rounded-lg border border-zinc-200 p-6 space-y-3">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-semibold text-slate-700">轉檔結果（最新的在最上面）</h2>
-        <button type="button" id="clear-results-btn" class="text-xs text-slate-400 hover:text-red-500">清除全部</button>
+        <h2 class="text-sm font-semibold text-zinc-700">轉檔結果（最新的在最上面）</h2>
+        <button type="button" id="clear-results-btn" class="text-xs text-zinc-400 hover:text-red-500">清除全部</button>
       </div>
       <div id="result-list" class="space-y-2">
         <!-- 範例結果項目（由 JS 動態插入，結構參考）：
-        <div class="flex items-center justify-between text-sm bg-slate-50 rounded px-3 py-2">
+        <div class="flex items-center justify-between text-sm bg-zinc-50 rounded px-3 py-2">
           <span>photo-converted.webp（1.2 MB）</span>
           <a href="blob:..." download="photo-converted.webp" class="text-brand font-medium">下載</a>
         </div>
@@ -745,12 +742,12 @@
       <!-- ---- Modal：記憶體不足警告（軟性，可繼續） ---- -->
       <div class="modal-panel is-hidden bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-3" data-modal-type="memory-warning" role="alertdialog" aria-modal="true">
         <h3 class="font-semibold text-warning">裝置記憶體可能不足</h3>
-        <p class="text-sm text-slate-600">
+        <p class="text-sm text-zinc-600">
           偵測到您的裝置可用記憶體偏低，轉檔過程中網頁可能會閃退或無回應。
           建議先關閉其他分頁，或改用較小的檔案再試一次。
         </p>
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded text-slate-500 hover:bg-slate-100">取消</button>
+          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded text-zinc-500 hover:bg-zinc-100">取消</button>
           <button type="button" class="modal-confirm-btn text-sm px-3 py-1.5 rounded bg-warning text-white hover:opacity-90">仍要繼續</button>
         </div>
       </div>
@@ -758,32 +755,32 @@
       <!-- ---- Modal：Safari 大檔阻擋（硬性，不可繼續） ---- -->
       <div class="modal-panel is-hidden bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-3" data-modal-type="safari-block" role="alertdialog" aria-modal="true">
         <h3 class="font-semibold text-blocked">檔案過大，無法於 Safari 轉檔</h3>
-        <p class="text-sm text-slate-600">
+        <p class="text-sm text-zinc-600">
           由於 Safari 瀏覽器底層限制，超過 150MB 的影片無法在此瀏覽器完成轉檔。
           請改用 Chrome 或 Edge 瀏覽器開啟本頁面處理大檔案。
         </p>
         <div class="flex justify-end pt-2">
-          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200">我知道了</button>
+          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-zinc-100 hover:bg-zinc-200">我知道了</button>
         </div>
       </div>
 
       <!-- ---- Modal：行動端影音功能阻擋 ---- -->
       <div class="modal-panel is-hidden bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-3" data-modal-type="mobile-video-block" role="alertdialog" aria-modal="true">
         <h3 class="font-semibold text-blocked">此裝置不支援影音／音訊轉檔</h3>
-        <p class="text-sm text-slate-600">
+        <p class="text-sm text-zinc-600">
           手機與平板裝置的瀏覽器記憶體限制較嚴格，容易在轉檔過程中發生當機。
           此功能僅開放桌面版瀏覽器使用，請改用電腦操作。
         </p>
         <div class="flex justify-end pt-2">
-          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200">我知道了</button>
+          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-zinc-100 hover:bg-zinc-200">我知道了</button>
         </div>
       </div>
 
       <!-- ---- Modal：中文字型下載中 ---- -->
       <div class="modal-panel is-hidden bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-3" data-modal-type="font-downloading" role="status" aria-modal="true">
-        <h3 class="font-semibold text-slate-700">正在下載中文字型核心（約 5.5 MB）...</h3>
-        <p class="text-sm text-slate-500">確保 PDF 轉檔的圖片結果不會缺字，僅需下載一次，之後將自動快取於本機。</p>
-        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <h3 class="font-semibold text-zinc-700">正在下載中文字型核心（約 5.5 MB）...</h3>
+        <p class="text-sm text-zinc-500">確保 PDF 轉檔的圖片結果不會缺字，僅需下載一次，之後將自動快取於本機。</p>
+        <div class="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden">
           <div id="font-download-progress-fill" class="h-full bg-brand rounded-full" style="width: 0%"></div>
         </div>
       </div>
@@ -791,18 +788,18 @@
       <!-- ---- Modal：字型快取讀寫失敗，已自動重試 ---- -->
       <div class="modal-panel is-hidden bg-white rounded-lg shadow-xl max-w-sm w-full p-6 space-y-3" data-modal-type="font-cache-error" role="alertdialog" aria-modal="true">
         <h3 class="font-semibold text-warning">字型快取發生問題</h3>
-        <p class="text-sm text-slate-600">
+        <p class="text-sm text-zinc-600">
           本機字型快取讀取失敗，系統已自動清除舊快取並重新下載，請稍候。
         </p>
         <div class="flex justify-end pt-2">
-          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200">好的</button>
+          <button type="button" class="modal-cancel-btn text-sm px-3 py-1.5 rounded bg-zinc-100 hover:bg-zinc-200">好的</button>
         </div>
       </div>
 
     </div>
   </div>
 
-  <footer class="border-t border-slate-200 py-6 text-center text-xs text-slate-400">
+  <footer class="border-t border-zinc-200 py-6 text-center text-xs text-zinc-400">
     所有轉檔皆在你的瀏覽器本機執行，檔案不會被上傳或儲存於任何伺服器。
   </footer>
 

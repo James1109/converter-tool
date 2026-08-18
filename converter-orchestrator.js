@@ -56,7 +56,7 @@ const TOOL_LABELS = {
   video: '影音',
   audio: '音訊',
   'ai-document': 'AI 文件處理',
-  'gh-actions-document': '進階轉檔（GitHub Actions）',
+  'gh-actions-document': '精準轉檔',
 };
 
 /**

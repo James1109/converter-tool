@@ -34,22 +34,6 @@
 import { EventBus_instance } from './event-bus.js';
 import { detectProviderFromKey } from './ai-provider-detect.js';
 
-// -------------------------------------------------------------------------
-// 「文件轉檔」面板的來源／目標格式對照表。目前每個來源格式只對應一種
-// 目標格式（純前端技術限制使然，見下方 initDocumentFormatSelectors()
-// 的說明），但集中定義在這裡，未來要擴充新組合（例如 PDF → 文字、
-// Word → HTML）只需要在這張表加一筆，不需要動其他程式碼。
-// -------------------------------------------------------------------------
-const DOCUMENT_TARGET_OPTIONS_BY_SOURCE = {
-  pdf: [{ value: 'image', label: '圖片（PNG，每頁各一張）' }],
-  docx: [{ value: 'pdf', label: 'PDF' }],
-};
-
-const DOCUMENT_DIRECTION_MAP = {
-  'pdf->image': 'pdf-to-image',
-  'docx->pdf': 'word-to-pdf',
-};
-
 // -----------------------------------------------------------------------
 // 事件名稱常數：跟 device-profiler.js 一樣，集中定義避免字串打錯字。
 // 「core → UI」與「UI → core」的方向在註解中明確標示，方便日後追蹤資料流。
@@ -331,11 +315,8 @@ function collectOptionsForTool(tool) {
     };
   }
   if (tool === 'document') {
-    const sourceFormat = document.getElementById('document-source-format').value;
-    const targetFormat = document.getElementById('document-target-format').value;
-    return {
-      direction: DOCUMENT_DIRECTION_MAP[`${sourceFormat}->${targetFormat}`] || 'word-to-pdf',
-    };
+    // 這個面板現在只做 PDF → 圖片，方向固定，不需要讓使用者選。
+    return { direction: 'pdf-to-image' };
   }
   if (tool === 'video') {
     return {
@@ -386,87 +367,7 @@ function collectOptionsForTool(tool) {
  * -------------------------------------------------------------------------
  */
 // =========================================================================
-// 區塊 B-3：文件轉檔面板內的子模式切換（標準轉檔 / AI 智慧處理）
-// =========================================================================
-
-/**
- * initDocumentModeToggle()
- * -------------------------------------------------------------------------
- * 純畫面切換，不影響底層兩個 tool（'document' / 'ai-document'）各自
- * 獨立的驗證與轉檔邏輯——切換子模式只是決定「現在看得到哪一個
- * dropzone/開始按鈕」，兩邊各自選過的檔案（uiState.selectedFiles）
- * 仍然分開保留，切換回去不會遺失。
- * -------------------------------------------------------------------------
- */
-/**
- * initDocumentFormatSelectors()
- * -------------------------------------------------------------------------
- * 「來源格式」下拉選單改變時，重新產生「目標格式」下拉選單的選項
- * （依 DOCUMENT_TARGET_OPTIONS_BY_SOURCE 這張表）。
- *
- * 為什麼目前每個來源格式只能對應一種目標格式：純前端環境下，
- * PDF→圖片靠的是 pdf.js 把每一頁畫到 canvas；Word→PDF 靠的是
- * mammoth.js 解析 + html2canvas 截圖。這兩條路徑用的函式庫完全不同，
- * 「PDF→Word」「圖片→PDF」這類組合各自需要另外的函式庫與邏輯，
- * 不是在畫面上多加一個選項就能生效的，之後要擴充需要一併補上對應的
- * Converter 實作，這裡只是先把「選來源、選目標」的 UI 骨架做好。
- * -------------------------------------------------------------------------
- */
-function initDocumentFormatSelectors() {
-  const sourceSelect = document.getElementById('document-source-format');
-  const targetSelect = document.getElementById('document-target-format');
-  if (!sourceSelect || !targetSelect) return;
-
-  function refreshTargetOptions() {
-    const options = DOCUMENT_TARGET_OPTIONS_BY_SOURCE[sourceSelect.value] || [];
-    targetSelect.innerHTML = '';
-    options.forEach(({ value, label }) => {
-      const opt = document.createElement('option');
-      opt.value = value;
-      opt.textContent = label;
-      targetSelect.appendChild(opt);
-    });
-  }
-
-  sourceSelect.addEventListener('change', refreshTargetOptions);
-  refreshTargetOptions(); // 頁面載入時先跑一次，確保目標格式選單一開始就有正確選項
-}
-
-function initDocumentModeToggle() {
-  const standardBtn = document.getElementById('document-mode-standard-btn');
-  const aiBtn = document.getElementById('document-mode-ai-btn');
-  const standardSection = document.getElementById('document-mode-standard');
-  const aiSection = document.getElementById('document-mode-ai');
-
-  if (!standardBtn || !aiBtn) return;
-
-  function setMode(mode) {
-    const isAi = mode === 'ai';
-    if (isAi) {
-      showEl(aiSection);
-      hideEl(standardSection);
-    } else {
-      showEl(standardSection);
-      hideEl(aiSection);
-    }
-    // 用 class 而非 disabled 表達「目前選中」，維持跟其他分頁按鈕
-    // 一致的視覺語言（白底 + 品牌色文字 = 使用中）。
-    standardBtn.classList.toggle('bg-white', !isAi);
-    standardBtn.classList.toggle('shadow-sm', !isAi);
-    standardBtn.classList.toggle('text-brand', !isAi);
-    standardBtn.classList.toggle('text-slate-500', isAi);
-    aiBtn.classList.toggle('bg-white', isAi);
-    aiBtn.classList.toggle('shadow-sm', isAi);
-    aiBtn.classList.toggle('text-brand', isAi);
-    aiBtn.classList.toggle('text-slate-500', !isAi);
-  }
-
-  standardBtn.addEventListener('click', () => setMode('standard'));
-  aiBtn.addEventListener('click', () => setMode('ai'));
-}
-
-// =========================================================================
-// 區塊 B-1b：進階轉檔（GitHub Actions）面板設定
+// 區塊 B-2b：GitHub 進階轉檔（GitHub Actions）面板設定
 // =========================================================================
 
 function initGithubActionsSettingsPanel() {

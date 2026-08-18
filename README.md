@@ -9,12 +9,11 @@
 ## 核心特色
 
 - **圖片轉檔**：常見格式互轉，品質可調
-- **PDF ↔ 圖片**：PDF 逐頁轉成圖片
-- **Word → PDF**：兩種模式
-  - 標準轉檔：mammoth.js 解析 + 自製排版渲染器，免金鑰、免網路連線
-  - AI 智慧處理：BYOK 呼叫 Gemini / OpenAI，提供「完整忠實轉寫」「智慧整理與修飾」「自訂提示詞」三種模式，輸出 PDF 或可複製文字的 HTML
+- **PDF → 圖片**：PDF 逐頁轉成圖片，純前端（pdf.js）
+- **AI 智慧文件處理**：BYOK 呼叫 Gemini / OpenAI，提供「完整忠實轉寫」「智慧整理與修飾」「自訂提示詞」三種模式，輸出 PDF 或可複製文字的 HTML
+- **精準轉檔（GitHub Actions + LibreOffice）**：串接使用者自己 Fork 出去的 repo，用真正的 LibreOffice 排版引擎轉檔，支援 PDF / HTML / PNG / JPG，排版精確度與 SmartArt 支援度都優於純瀏覽器渲染，取代了原本的「標準 Word→PDF」路徑
 - **影音轉檔**：FFmpeg.wasm，含裝置能力偵測（Safari/行動裝置的差異化限制）
-- **零伺服器**：所有運算都在瀏覽器本機執行；AI 功能的 API Key 只存在 localStorage，直接呼叫 Gemini/OpenAI 官方端點，不經過本專案的任何後端（因為沒有後端）
+- **零伺服器**：所有運算都在瀏覽器本機執行；AI 功能與精準轉檔功能的金鑰只存在 localStorage，直接呼叫官方端點，不經過本專案的任何後端（因為沒有後端）
 
 ## 技術架構
 

@@ -2,50 +2,26 @@
  * =============================================================================
  * converters/PdfConverter.js
  * =============================================================================
- * 【重要架構異動說明，請詳讀】
- * 'word-to-pdf' 方向原本透過 createEphemeralWorker() 交給
- * workers/pdf-worker.js（mammoth.js + pdf-lib 手動排版）在獨立 Worker
- * 執行緒中處理。實測發現：只要原始文件裡出現英文字母組合剛好命中
- * 內嵌字型的 GSUB 連字規則（例如 "Firebase"、"office" 裡的 "fi"），
- * pdf-lib 底層的 fontkit 會把這兩個字母合併成一個連字字形，但
- * pdf-worker.js 手刻的換行/字寬計算邏輯是按「一個字元＝一份寬度」
- * 在算的，兩者對不起來，就會出現「數字跟文字疊在一起」「firebase
- * 被拆成 fi + rebase 甚至變成亂碼」這類排版錯誤。這是 pdf-lib/
- * fontkit 連字替換與手刻排版邏輯衝突的已知問題類別，不是單一行
- * 程式碼可以簡單修掉的臭蟲。
+ * 現在只剩 'pdf-to-image'（PDF 逐頁轉圖片）這一條路徑。原本這裡還有
+ * 一條 'word-to-pdf' 路徑（mammoth.js + html2canvas 螢幕截圖渲染），
+ * 但既然「精準轉檔」分頁（converters/GithubActionsConverter.js，走
+ * 真正的 LibreOffice 排版引擎）在排版精確度、字型處理、SmartArt 支援
+ * 上全面勝出，維護兩條 Word→PDF 路徑不再有意義，已經整個移除，UI 上
+ * 也拿掉了對應的格式選項。
  *
- * 因此 'word-to-pdf' 方向改成跟 AiDocumentConverter 共用同一套
- * html-to-pdf-renderer.js（html2canvas 螢幕截圖式渲染）：文字排版
- * 交給瀏覽器自己處理，我們只是把畫面截圖存成 PDF，從根本上避開
- *「自己算寬度算錯」這個問題類別。代價是輸出的 PDF 文字不可反白
- * 選取/複製（截圖本質如此），這點會在 UI 上跟使用者說明清楚。
- *
- * workers/pdf-worker.js 檔案本身保留在專案中但不再被呼叫（deprecated），
- * 之後如果要徹底移除記得一併清掉 worker 檔案本身。
- *
- * 'pdf-to-image' 方向維持原本設計，一樣在主執行緒執行（pdf.js 的對外
- * API 入口 pdfjsLib.getDocument() 會存取 `document` 這個瀏覽器全域
- * 物件，Worker 執行緒內沒有這個物件會直接拋錯，這是函式庫本身的
- * 設計限制）。
+ * 'pdf-to-image' 維持在主執行緒執行（pdf.js 的對外 API 入口
+ * pdfjsLib.getDocument() 會存取 `document` 這個瀏覽器全域物件，Worker
+ * 執行緒內沒有這個物件會直接拋錯，這是函式庫本身的設計限制）。
  * =============================================================================
  */
 
 import { EventBus_instance } from '../event-bus.js';
-import { registerMainThreadTask, clearMainThreadTask } from '../worker-lifecycle.js';
-import { extractDocxHtml } from '../mammoth-extract.js';
-import { renderHtmlToPdfBlob } from '../html-to-pdf-renderer.js';
-import { extractDocxPageSetup } from '../docx-page-setup.js';
-import { countUnsupportedSmartArt, buildSmartArtWarningHtml } from '../docx-content-audit.js';
-import { renderAllSmartArtToHtml } from '../docx-smartart-render.js';
 
 const PDFJS_LIB_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.min.mjs';
 const PDFJS_WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs';
 const PDFJS_CMAPS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/cmaps/';
 const PDFJS_STANDARD_FONTS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/';
 
-// 'word-to-pdf' 現在也是主執行緒路徑了，跟 'pdf-to-image' 共用同一個
-// 忙碌旗標即可——'document' 這個 tool 本來就只可能同時執行其中一個
-// 方向，不會有兩個方向搶著跑的情境。
 let isMainThreadTaskBusy = false;
 let cachedPdfjsLib = null;
 
@@ -68,87 +44,13 @@ export function isBusy() {
 /**
  * start(file, options)
  * -------------------------------------------------------------------------
- * 對外唯一入口，依 options.direction 分流。
+ * 對外唯一入口。目前只有一種行為（PDF 轉圖片），保留 options 參數是
+ * 為了跟其他 Converter 維持一致的呼叫介面，不代表未來一定會再擴充
+ * 方向選項。
  * -------------------------------------------------------------------------
  */
 export async function start(file, options = {}) {
-  if (options.direction === 'pdf-to-image') {
-    return runPdfToImageOnMainThread(file, options);
-  }
-  return runWordToPdfOnMainThread(file, options);
-}
-
-// =========================================================================
-// 'word-to-pdf' 方向：mammoth.js 解析 + html-to-pdf-renderer 共用渲染器
-// =========================================================================
-
-async function runWordToPdfOnMainThread(file, options) {
-  if (isMainThreadTaskBusy) {
-    console.warn('[PdfConverter] 已有一個文件轉檔任務在執行中，忽略本次重複呼叫。');
-    return;
-  }
-  isMainThreadTaskBusy = true;
-  registerMainThreadTask('document', { onCancel: null }); // pdf.js/html2canvas 都沒有乾淨的中途取消 API，見檔頭說明
-
-  try {
-    EventBus_instance.emit('converter:progress-raw', {
-      tool: 'document',
-      percent: 10,
-      label: '正在解析 Word 文件內容...',
-    });
-
-    const sourceHtml = await extractDocxHtml(file);
-    if (!sourceHtml || sourceHtml.trim().length === 0) {
-      throw new Error('無法從此 Word 文件解析出任何內容，檔案可能已損毀或為空白文件。');
-    }
-
-    // 檢查是否有 mammoth.js 無法轉換的 SmartArt 圖表，有的話在內容最前面
-    // 插入提示，並嘗試用 docx-smartart-render.js 把 Word 內部存的
-    // 「SmartArt 備援渲染快照」還原成 SVG 圖表（見該檔案檔頭說明，這
-    // 不是重新實作排版演算法，是讀取 Word 自己存好的算圖結果）；還原
-    // 失敗或該文件版本沒有這份快照時，renderAllSmartArtToHtml 會回傳
-    // 空字串，畫面上只會看到警告，不會出現錯誤。
-    const smartArtCount = await countUnsupportedSmartArt(file);
-    const smartArtHtml = smartArtCount > 0 ? await renderAllSmartArtToHtml(file) : '';
-    const sourceHtmlWithWarning = buildSmartArtWarningHtml(smartArtCount) + sourceHtml + smartArtHtml;
-
-    EventBus_instance.emit('converter:progress-raw', {
-      tool: 'document',
-      percent: 30,
-      label: '正在讀取原始頁面設定...',
-    });
-
-    // 讀取原始 .docx 實際使用的頁面尺寸/邊界/字級，讓輸出 PDF 的分頁
-    // 位置盡量貼近 Word 原本的樣子，而不是套用我們憑感覺猜的固定值。
-    const pageSetup = await extractDocxPageSetup(file);
-
-    EventBus_instance.emit('converter:progress-raw', {
-      tool: 'document',
-      percent: 50,
-      label: '正在產生 PDF...',
-    });
-
-    const baseName = file.name.replace(/\.docx?$/i, '');
-    const pdfBlob = await renderHtmlToPdfBlob(sourceHtmlWithWarning, baseName, pageSetup);
-
-    EventBus_instance.emit('converter:progress-raw', { tool: 'document', percent: 100, label: '轉檔完成' });
-
-    EventBus_instance.emit('converter:result', {
-      tool: 'document',
-      blobUrl: URL.createObjectURL(pdfBlob),
-      fileName: buildOutputFileName(file.name, 'converted', 'pdf'),
-      fileSizeBytes: pdfBlob.size,
-    });
-  } catch (err) {
-    console.error('[PdfConverter] Word 轉 PDF 失敗：', err);
-    EventBus_instance.emit('converter:error', {
-      tool: 'document',
-      message: err && err.message ? err.message : 'Word 轉 PDF 過程發生未預期的錯誤。',
-    });
-  } finally {
-    isMainThreadTaskBusy = false;
-    clearMainThreadTask('document', 'completed');
-  }
+  return runPdfToImageOnMainThread(file, options);
 }
 
 // =========================================================================

@@ -168,7 +168,7 @@ export async function start(file, options) {
   const targetFormat = (options.targetFormat || 'pdf').trim().toLowerCase();
 
   if (!owner || !repo || !token) {
-    emitError('請先填寫 GitHub 帳號、repo 名稱與 Personal Access Token 才能使用進階轉檔功能。');
+    emitError('請先填寫 GitHub 帳號、repo 名稱與 Personal Access Token 才能使用精準轉檔功能。');
     return;
   }
 
@@ -236,7 +236,7 @@ export async function start(file, options) {
     deleteFile(owner, repo, branch, token, match.path, match.sha);
   } catch (err) {
     console.error('[GithubActionsConverter] 轉檔失敗：', err);
-    emitError(err && err.message ? err.message : '進階轉檔過程發生未知錯誤，請重新嘗試。');
+    emitError(err && err.message ? err.message : '精準轉檔過程發生未知錯誤，請重新嘗試。');
   } finally {
     busy = false;
     clearMainThreadTask('gh-actions-document', 'completed');
