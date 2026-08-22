@@ -242,16 +242,7 @@
         role="tab"
         aria-selected="false"
       >
-        PDF 轉圖片
-      </button>
-      <button
-        type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
-        data-tool="ai-document"
-        role="tab"
-        aria-selected="false"
-      >
-        AI 智慧處理 ✨
+        文件轉檔
       </button>
       <button
         type="button"
@@ -272,15 +263,6 @@
         data-requires-desktop="true"
       >
         音訊轉檔
-      </button>
-      <button
-        type="button"
-        class="tool-tab-btn px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-zinc-500 hover:text-zinc-700"
-        data-tool="gh-actions-document"
-        role="tab"
-        aria-selected="false"
-      >
-        精準轉檔 ⚙️
       </button>
     </nav>
 
@@ -341,159 +323,240 @@
            LibreOffice 引擎）在排版精確度上全面勝出，已經整個移除，
            不再維護重複的兩條 Word→PDF 路徑。
       -->
+      <!-- =====================================================================
+           ---- 文件轉檔面板（合併：PDF↔圖片 / AI 智慧處理 / 精準轉檔）----
+           =====================================================================
+           單一拖曳區，依副檔名自動判斷檔案類型後，動態顯示對應的後續選項：
+             - .pdf              → 只會用到 PdfConverter（tool='document'）
+             - .docx/.doc/.odt   → 使用者可在「AI 智慧處理」與「精準轉檔」
+                                    兩種處理方式之間切換，分別對應
+                                    AiDocumentConverter（tool='ai-document'）
+                                    與 GithubActionsConverter
+                                    （tool='gh-actions-document'）
+
+           三個底層 tool 的核心轉檔邏輯完全沒有變動，這裡只是把「選擇要用
+           哪個工具」這件事，從「使用者自己先判斷、切到對的分頁」，
+           改成「工具自動判斷檔案類型，使用者只需要在有意義的情況下
+           （也就是 Word 文件）選擇處理方式」。實際的「偵測類型 → 顯示
+           對應區塊 → 決定要 emit 哪個 tool 的 START 事件」邏輯在
+           ui-bridge.js 的 initUnifiedDocumentPanel()。
+      -->
       <div id="panel-document" class="tool-panel is-hidden space-y-4" data-panel-for="document">
+
         <div
+          id="unified-document-dropzone"
           class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
-          data-tool="document"
         >
-          <p class="text-zinc-500 text-sm">拖曳 PDF 檔案到此處，或點擊選擇檔案</p>
-          <p class="text-zinc-400 text-xs mt-1">將 PDF 逐頁轉成圖片</p>
-          <input type="file" class="file-input hidden" accept=".pdf" data-tool="document" />
+          <p class="text-zinc-500 text-sm">拖曳 PDF 或 Word 檔案到此處，或點擊選擇檔案</p>
+          <p class="text-zinc-400 text-xs mt-1">自動判斷檔案類型：PDF 會轉成圖片；Word 可選擇 AI 智慧處理或精準轉檔</p>
+          <input type="file" id="unified-document-file-input" class="file-input hidden" accept=".pdf,.docx,.doc,.odt" />
         </div>
 
-        <!-- 行動端限制提示：僅在行動端會由 ui-bridge.js 顯示，說明「僅開放 5MB 以內」 -->
+        <p id="unified-document-filename" class="is-hidden text-xs text-zinc-500"></p>
+
+        <!-- 行動端限制提示：PDF 分支專用，僅在行動端會由 ui-bridge.js 顯示 -->
         <p id="document-mobile-limit-hint" class="is-hidden text-xs text-warning">
           偵測到行動裝置：僅支援 5MB 以內的小型文件轉檔。
         </p>
 
-        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="document" disabled>
+        <!-- ================= 分支一：偵測到 PDF ================= -->
+        <div id="unified-pdf-section" class="is-hidden space-y-3">
+          <p class="text-sm text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2">已偵測到 PDF 檔案，將逐頁轉成圖片。</p>
+        </div>
+
+        <!-- ================= 分支二：偵測到 Word 文件 ================= -->
+        <div id="unified-word-section" class="is-hidden space-y-4">
+
+          <!-- ---- 處理方式切換 ---- -->
+          <div class="inline-flex rounded-lg border border-zinc-200 p-1 bg-zinc-50 text-sm">
+            <button type="button" id="unified-method-ai-btn" class="unified-method-btn px-3 py-1.5 rounded-md font-medium bg-white shadow-sm text-brand" data-method="ai">
+              AI 智慧處理 ✨
+            </button>
+            <button type="button" id="unified-method-precision-btn" class="unified-method-btn px-3 py-1.5 rounded-md font-medium text-zinc-500" data-method="precision">
+              精準轉檔 ⚙️
+            </button>
+          </div>
+
+          <!-- ---- 子區塊：AI 智慧處理（BYOK）---- -->
+          <div id="unified-ai-controls" class="space-y-4">
+
+            <div class="bg-blue-50 border border-blue-200 text-xs text-blue-800 rounded-lg p-3">
+              🔒 你的 API Key 只會儲存在「這台裝置的瀏覽器」裡（localStorage），且只會直接送往你自己選擇的 AI 供應商官方端點，不會經過任何本站伺服器（本工具沒有伺服器）。
+            </div>
+
+            <!-- ---- 還沒有金鑰的使用者：3 分鐘免費申請教學 ---- -->
+            <div class="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-900 space-y-1.5">
+              <p class="font-semibold">還沒有 API Key？Google Gemini 提供免費額度，3 分鐘就能申請好：</p>
+              <ol class="list-decimal list-inside space-y-0.5">
+                <li>
+                  前往
+                  <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" class="underline font-medium">Google AI Studio（aistudio.google.com）</a>
+                  並用 Google 帳號登入
+                </li>
+                <li>點擊畫面右上角的「Get API Key」→「Create API key」</li>
+                <li>複製產生的金鑰，貼回上方的 API Key 欄位即可，不需要信用卡</li>
+              </ol>
+              <p class="text-emerald-700">免費額度有每日/每分鐘的請求次數上限，超過時 Google 官方 API 會回傳額度不足的錯誤訊息，屆時可以等隔天額度重置，或改綁付費方案。</p>
+            </div>
+
+            <!-- ---- SmartArt 限制說明（可展開）---- -->
+            <details class="border border-amber-200 bg-amber-50 rounded-lg text-xs text-amber-900">
+              <summary class="cursor-pointer select-none px-3 py-2 font-medium">
+                ⚠️ 文件裡有 SmartArt 圖表（組織圖/流程圖）？點此看處理方式
+              </summary>
+              <div class="px-3 pb-3 space-y-1.5">
+                <p>SmartArt 是向量資料格式，跟一般圖片（.png/.jpg）完全不同，這個瀏覽器端 AI 處理無法自動呈現 SmartArt，轉檔時這些圖表的畫面會被省略（文字內容仍會整理成附錄保留）。想要圖形本身完整還原，改選上方的「精準轉檔 ⚙️」即可，那邊用的是真正的 LibreOffice 引擎，可以正常處理 SmartArt。</p>
+                <p class="font-medium">如果想在這個 AI 面板裡也保留 SmartArt 圖形本身，請先在 Word 裡手動處理一次：</p>
+                <ol class="list-decimal list-inside space-y-0.5">
+                  <li>在 Word 裡點選該 SmartArt 圖表</li>
+                  <li>滑鼠右鍵 →「另存為圖片」（或先「複製」，再「選擇性貼上」→「圖片」貼回原本位置，取代原本的 SmartArt）</li>
+                  <li>存檔後再把這份 .docx 上傳到這裡轉檔，圖片就能正常被讀取</li>
+                </ol>
+              </div>
+            </details>
+
+            <!-- ---- BYOK 金鑰設定區 ---- -->
+            <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+              <h3 class="text-sm font-semibold text-zinc-700">AI 供應商設定</h3>
+              <p class="text-xs text-zinc-500">目前支援：<span class="font-medium text-zinc-700">Google Gemini</span>、<span class="font-medium text-zinc-700">OpenAI</span>。貼上你的 API Key 後，系統會自動判斷是哪一家、直接呼叫對應官方端點，不需要另外選擇。</p>
+              <div class="flex flex-wrap gap-4 text-sm items-end">
+                <label class="flex-1 min-w-[220px] flex items-center gap-2">
+                  API Key
+                  <input
+                    type="password"
+                    id="ai-api-key"
+                    placeholder="貼上你的 API Key"
+                    class="border border-zinc-300 rounded px-2 py-1 flex-1"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="flex items-center gap-1.5 text-zinc-500 text-xs whitespace-nowrap">
+                  <input type="checkbox" id="ai-remember-key" />
+                  記住金鑰（存於本機）
+                </label>
+              </div>
+              <p id="ai-key-detect-hint" class="text-xs font-medium"></p>
+              <p id="ai-key-status-hint" class="text-xs text-zinc-400"></p>
+            </div>
+
+            <!-- ---- 三大處理模式 ---- -->
+            <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+              <h3 class="text-sm font-semibold text-zinc-700">處理模式</h3>
+              <div class="space-y-2 text-sm">
+                <label class="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="ai-mode" value="lossless" checked class="mt-1" />
+                  <span>
+                    <span class="font-medium">完整忠實轉寫（無損）</span>
+                    <span class="block text-xs text-zinc-500">僅做格式美化與結構化，絕不刪減或修改任何原始文字。</span>
+                  </span>
+                </label>
+                <label class="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="ai-mode" value="polish" class="mt-1" />
+                  <span>
+                    <span class="font-medium">AI 智慧整理與修飾</span>
+                    <span class="block text-xs text-zinc-500">自動修正錯別字、潤飾語句，整理成排版優美的結構化報告。</span>
+                  </span>
+                </label>
+                <label class="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="ai-mode" value="custom" class="mt-1" />
+                  <span>
+                    <span class="font-medium">自訂提示詞</span>
+                    <span class="block text-xs text-zinc-500">自行輸入指令，例如：翻譯成英文、摘要條列、提取合約重點等。</span>
+                  </span>
+                </label>
+              </div>
+
+              <textarea
+                id="ai-custom-prompt"
+                class="is-hidden w-full border border-zinc-300 rounded px-3 py-2 text-sm"
+                rows="3"
+                placeholder="輸入你想要 AI 執行的指令，例如：請將這份文件翻譯成英文，並保留原本的段落結構。"
+              ></textarea>
+            </div>
+
+            <!-- ---- 輸出格式 ---- -->
+            <div class="flex flex-wrap gap-4 text-sm items-center">
+              <label class="flex items-center gap-2">
+                輸出格式
+                <select id="ai-output-format" class="border border-zinc-300 rounded px-2 py-1">
+                  <option value="pdf">PDF（排版截圖，適合列印/分享，文字無法選取複製）</option>
+                  <option value="html">HTML（純網頁檔，文字可選取複製，用瀏覽器開啟）</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- ---- 子區塊：精準轉檔（GitHub Actions + LibreOffice）---- -->
+          <div id="unified-precision-controls" class="is-hidden space-y-4">
+
+            <div class="bg-blue-50 border border-blue-200 text-xs text-blue-800 rounded-lg p-3">
+              🔒 這裡填的 GitHub Token 只會存在這台裝置的瀏覽器裡，並且只會直接送往 GitHub 官方 API，不會經過本站任何伺服器。強烈建議申請 Token 時，把權限範圍限縮到「只能存取你自己這個 repo 的內容」，不要給予帳號其他多餘的權限。
+            </div>
+
+            <details class="border border-zinc-200 rounded-lg text-xs text-zinc-600" open>
+              <summary class="cursor-pointer select-none px-3 py-2 font-medium text-zinc-700">
+                🛠️ 第一次使用？先完成這兩個一次性設定（點此展開步驟）
+              </summary>
+              <div class="px-3 pb-3 space-y-3">
+                <div>
+                  <p class="font-medium text-zinc-700">步驟一：Fork 這個專案到你自己的帳號</p>
+                  <p>在 GitHub 上開啟本專案的頁面，點右上角「Fork」，複製一份到你自己的帳號底下（這一步是一次性的，之後轉檔都用這個 Fork 出來的 repo）。</p>
+                </div>
+                <div>
+                  <p class="font-medium text-zinc-700">步驟二：申請一組權限縮小範圍的 Personal Access Token</p>
+                  <p>前往 GitHub 「Settings → Developer settings → Personal access tokens → Fine-grained tokens」，建立新 Token 時：</p>
+                  <ul class="list-disc list-inside">
+                    <li>Repository access 選「Only select repositories」，只勾選你剛剛 Fork 出來的那一個</li>
+                    <li>Permissions 裡把「Contents」設為「Read and write」，其他權限保持預設（不給）</li>
+                  </ul>
+                  <p>建立好之後複製那組 Token（只會顯示一次），貼到下方欄位。</p>
+                </div>
+              </div>
+            </details>
+
+            <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
+              <h3 class="text-sm font-semibold text-zinc-700">GitHub 設定</h3>
+              <div class="flex flex-wrap gap-4 text-sm items-end">
+                <label class="flex items-center gap-2">
+                  GitHub 帳號
+                  <input type="text" id="gh-owner" placeholder="例如 octocat" class="border border-zinc-300 rounded px-2 py-1" autocomplete="off" />
+                </label>
+                <label class="flex items-center gap-2">
+                  Repo 名稱
+                  <input type="text" id="gh-repo" placeholder="Fork 出來的 repo 名稱" class="border border-zinc-300 rounded px-2 py-1" autocomplete="off" />
+                </label>
+                <label class="flex-1 min-w-[220px] flex items-center gap-2">
+                  Personal Access Token
+                  <input type="password" id="gh-token" placeholder="貼上你的 Token" class="border border-zinc-300 rounded px-2 py-1 flex-1" autocomplete="off" />
+                </label>
+                <label class="flex items-center gap-1.5 text-zinc-500 text-xs whitespace-nowrap">
+                  <input type="checkbox" id="gh-remember" />
+                  記住設定（存於本機）
+                </label>
+              </div>
+            </div>
+
+            <p class="text-zinc-400 text-xs">用真正的 LibreOffice 排版引擎完整轉換（含 SmartArt），單檔上限 20MB；轉檔通常需要 30 秒～2 分鐘，請耐心等候</p>
+
+            <div class="flex flex-wrap gap-4 text-sm items-center">
+              <label class="flex items-center gap-2">
+                目標格式
+                <select id="gh-target-format" class="border border-zinc-300 rounded px-2 py-1">
+                  <option value="pdf">PDF</option>
+                  <option value="html">HTML（文字可選取複製）</option>
+                  <option value="png">PNG 圖片（每頁一張，打包成 zip）</option>
+                  <option value="jpg">JPG 圖片（每頁一張，打包成 zip）</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button type="button" id="unified-document-start-btn" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" disabled>
           開始轉檔
         </button>
       </div>
 
-      <!-- =====================================================================
-           ---- AI 智慧文件處理面板（BYOK）----
-           =====================================================================
-           .docx → mammoth.js 解析 → 依模式組合 Prompt → 呼叫使用者自備金鑰的
-           Gemini / OpenAI API → 輸出 PDF 或 HTML。所有邏輯都在
-           converters/AiDocumentConverter.js（core 層）。
-      -->
-      <div id="panel-ai-document" class="tool-panel is-hidden space-y-4" data-panel-for="ai-document">
-
-        <div class="bg-blue-50 border border-blue-200 text-xs text-blue-800 rounded-lg p-3">
-          🔒 你的 API Key 只會儲存在「這台裝置的瀏覽器」裡（localStorage），且只會直接送往你自己選擇的 AI 供應商官方端點，不會經過任何本站伺服器（本工具沒有伺服器）。
-        </div>
-
-        <!-- ---- 還沒有金鑰的使用者：3 分鐘免費申請教學 ---- -->
-        <div class="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-900 space-y-1.5">
-          <p class="font-semibold">還沒有 API Key？Google Gemini 提供免費額度，3 分鐘就能申請好：</p>
-          <ol class="list-decimal list-inside space-y-0.5">
-            <li>
-              前往
-              <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" class="underline font-medium">Google AI Studio（aistudio.google.com）</a>
-              並用 Google 帳號登入
-            </li>
-            <li>點擊畫面右上角的「Get API Key」→「Create API key」</li>
-            <li>複製產生的金鑰，貼回上方的 API Key 欄位即可，不需要信用卡</li>
-          </ol>
-          <p class="text-emerald-700">免費額度有每日/每分鐘的請求次數上限，超過時 Google 官方 API 會回傳額度不足的錯誤訊息，屆時可以等隔天額度重置，或改綁付費方案。</p>
-        </div>
-
-        <!-- ---- SmartArt 限制說明（可展開）----
-             mammoth.js 只認得一般內嵌圖片，讀不懂 Word 的 SmartArt
-             （組織圖/流程圖，本質是向量資料+排版演算法，不是點陣圖），
-             純前端架構下沒有辦法自動畫出來（詳見 docx-content-audit.js
-             檔頭說明）。這個限制只影響這個瀏覽器端 AI 面板；「精準轉檔」
-             走的是真正的 LibreOffice 引擎，可以正常處理 SmartArt。 -->
-        <details class="border border-amber-200 bg-amber-50 rounded-lg text-xs text-amber-900">
-          <summary class="cursor-pointer select-none px-3 py-2 font-medium">
-            ⚠️ 文件裡有 SmartArt 圖表（組織圖/流程圖）？點此看處理方式
-          </summary>
-          <div class="px-3 pb-3 space-y-1.5">
-            <p>SmartArt 是向量資料格式，跟一般圖片（.png/.jpg）完全不同，這個瀏覽器端 AI 處理無法自動呈現 SmartArt，轉檔時這些圖表的畫面會被省略（文字內容仍會整理成附錄保留）。想要圖形本身完整還原，改用「精準轉檔 ⚙️」分頁即可，那邊用的是真正的 LibreOffice 引擎，可以正常處理 SmartArt。</p>
-            <p class="font-medium">如果想在這個 AI 面板裡也保留 SmartArt 圖形本身，請先在 Word 裡手動處理一次：</p>
-            <ol class="list-decimal list-inside space-y-0.5">
-              <li>在 Word 裡點選該 SmartArt 圖表</li>
-              <li>滑鼠右鍵 →「另存為圖片」（或先「複製」，再「選擇性貼上」→「圖片」貼回原本位置，取代原本的 SmartArt）</li>
-              <li>存檔後再把這份 .docx 上傳到這裡轉檔，圖片就能正常被讀取</li>
-            </ol>
-          </div>
-        </details>
-
-        <!-- ---- BYOK 金鑰設定區 ---- -->
-        <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
-          <h3 class="text-sm font-semibold text-zinc-700">AI 供應商設定</h3>
-          <p class="text-xs text-zinc-500">目前支援：<span class="font-medium text-zinc-700">Google Gemini</span>、<span class="font-medium text-zinc-700">OpenAI</span>。貼上你的 API Key 後，系統會自動判斷是哪一家、直接呼叫對應官方端點，不需要另外選擇。</p>
-          <div class="flex flex-wrap gap-4 text-sm items-end">
-            <label class="flex-1 min-w-[220px] flex items-center gap-2">
-              API Key
-              <input
-                type="password"
-                id="ai-api-key"
-                placeholder="貼上你的 API Key"
-                class="border border-zinc-300 rounded px-2 py-1 flex-1"
-                autocomplete="off"
-              />
-            </label>
-            <label class="flex items-center gap-1.5 text-zinc-500 text-xs whitespace-nowrap">
-              <input type="checkbox" id="ai-remember-key" />
-              記住金鑰（存於本機）
-            </label>
-          </div>
-          <p id="ai-key-detect-hint" class="text-xs font-medium"></p>
-          <p id="ai-key-status-hint" class="text-xs text-zinc-400"></p>
-        </div>
-
-        <!-- ---- 檔案拖曳區 ---- -->
-        <div
-          class="dropzone border-2 border-dashed border-zinc-300 rounded-lg p-8 text-center cursor-pointer hover:border-brand transition-colors"
-          data-tool="ai-document"
-        >
-          <p class="text-zinc-500 text-sm">拖曳 Word (.docx) 檔案到此處，或點擊選擇檔案</p>
-          <p class="text-zinc-400 text-xs mt-1">AI 會依你選擇的模式處理內容，最終輸出為排版好的 PDF</p>
-          <input type="file" class="file-input hidden" accept=".docx" data-tool="ai-document" />
-        </div>
-
-        <!-- ---- 三大處理模式 ---- -->
-        <div class="border border-zinc-200 rounded-lg p-4 space-y-3">
-          <h3 class="text-sm font-semibold text-zinc-700">處理模式</h3>
-          <div class="space-y-2 text-sm">
-            <label class="flex items-start gap-2 cursor-pointer">
-              <input type="radio" name="ai-mode" value="lossless" checked class="mt-1" />
-              <span>
-                <span class="font-medium">完整忠實轉寫（無損）</span>
-                <span class="block text-xs text-zinc-500">僅做格式美化與結構化，絕不刪減或修改任何原始文字。</span>
-              </span>
-            </label>
-            <label class="flex items-start gap-2 cursor-pointer">
-              <input type="radio" name="ai-mode" value="polish" class="mt-1" />
-              <span>
-                <span class="font-medium">AI 智慧整理與修飾</span>
-                <span class="block text-xs text-zinc-500">自動修正錯別字、潤飾語句，整理成排版優美的結構化報告。</span>
-              </span>
-            </label>
-            <label class="flex items-start gap-2 cursor-pointer">
-              <input type="radio" name="ai-mode" value="custom" class="mt-1" />
-              <span>
-                <span class="font-medium">自訂提示詞</span>
-                <span class="block text-xs text-zinc-500">自行輸入指令，例如：翻譯成英文、摘要條列、提取合約重點等。</span>
-              </span>
-            </label>
-          </div>
-
-          <textarea
-            id="ai-custom-prompt"
-            class="is-hidden w-full border border-zinc-300 rounded px-3 py-2 text-sm"
-            rows="3"
-            placeholder="輸入你想要 AI 執行的指令，例如：請將這份文件翻譯成英文，並保留原本的段落結構。"
-          ></textarea>
-        </div>
-
-        <!-- ---- 輸出格式 ---- -->
-        <div class="flex flex-wrap gap-4 text-sm items-center">
-          <label class="flex items-center gap-2">
-            輸出格式
-            <select id="ai-output-format" class="border border-zinc-300 rounded px-2 py-1">
-              <option value="pdf">PDF（排版截圖，適合列印/分享，文字無法選取複製）</option>
-              <option value="html">HTML（純網頁檔，文字可選取複製，用瀏覽器開啟）</option>
-            </select>
-          </label>
-        </div>
-
-        <button type="button" class="start-convert-btn bg-brand text-white text-sm font-semibold px-4 py-2 rounded hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed" data-tool="ai-document" disabled>
-          開始 AI 處理
-        </button>
-      </div>
 
       <!-- ---- 影音轉檔面板 ---- -->
       <div id="panel-video" class="tool-panel is-hidden space-y-4" data-panel-for="video">

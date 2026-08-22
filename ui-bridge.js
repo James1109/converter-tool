@@ -233,7 +233,12 @@ function handleFileChosen(tool, file) {
 }
 
 function initDropzones() {
-  const dropzones = document.querySelectorAll('.dropzone');
+  // 只處理「有 data-tool」的傳統單一用途拖曳區（圖片/影音/音訊）。
+  // 文件轉檔那個統一拖曳區（#unified-document-dropzone）故意不帶
+  // data-tool——上傳當下還不知道要用哪個 tool（要先看副檔名才能判斷），
+  // 所以交給 initUnifiedDocumentPanel() 自己處理，這裡略過它，避免
+  // 兩邊的邏輯互相打架。
+  const dropzones = document.querySelectorAll('.dropzone[data-tool]');
 
   dropzones.forEach((zone) => {
     const tool = zone.dataset.tool;
@@ -399,6 +404,118 @@ function initGithubActionsSettingsPanel() {
   });
 
   EventBus_instance.emit(EVENTS.GH_SETTINGS_REQUEST, {});
+}
+
+/**
+ * initUnifiedDocumentPanel()
+ * -------------------------------------------------------------------------
+ * 「文件轉檔」分頁的統一入口：一個拖曳區，上傳後自動判斷副檔名——
+ *   .pdf                → 轉成圖片（底層 tool = 'document'）
+ *   .docx / .doc / .odt → 依使用者選的「處理方式」決定底層 tool：
+ *       AI 智慧處理 ✨   → tool = 'ai-document'
+ *       精準轉檔 ⚙️      → tool = 'gh-actions-document'
+ *
+ * 三個底層 tool 各自的轉檔邏輯完全不受影響（分別在 PdfConverter.js /
+ * AiDocumentConverter.js / GithubActionsConverter.js），這個函式只負責
+ * 「畫面上要顯示哪個子區塊」「按下開始轉檔時要 emit 哪個 tool 的
+ * START 事件」這兩件事，不重新實作任何轉檔邏輯本身。
+ *
+ * 做法上刻意讓 #unified-document-start-btn 也掛上 `start-convert-btn`
+ * class：initDropzones() 裡原本就有一段「監聽所有 .start-convert-btn
+ * 點擊事件、讀取當下的 data-tool、送出 START」的通用邏輯，只要這裡
+ * 隨時把這顆按鈕的 data-tool 屬性維持在「目前偵測到／選擇的正確
+ * tool」，就可以直接沿用那段通用邏輯，不需要重寫一份幾乎一樣的
+ * 送出流程。
+ * -------------------------------------------------------------------------
+ */
+function initUnifiedDocumentPanel() {
+  const dropzone = document.getElementById('unified-document-dropzone');
+  const fileInput = document.getElementById('unified-document-file-input');
+  const filenameEl = document.getElementById('unified-document-filename');
+  const pdfSection = document.getElementById('unified-pdf-section');
+  const wordSection = document.getElementById('unified-word-section');
+  const aiControls = document.getElementById('unified-ai-controls');
+  const precisionControls = document.getElementById('unified-precision-controls');
+  const methodAiBtn = document.getElementById('unified-method-ai-btn');
+  const methodPrecisionBtn = document.getElementById('unified-method-precision-btn');
+  const startBtn = document.getElementById('unified-document-start-btn');
+
+  if (!dropzone || !fileInput || !startBtn) return; // 面板未渲染時直接跳過
+
+  let activeMethod = 'ai'; // 'ai' | 'precision'，只有 Word 文件才會用到
+
+  function resolveTool(fileName) {
+    if (/\.pdf$/i.test(fileName)) return 'document';
+    return activeMethod === 'precision' ? 'gh-actions-document' : 'ai-document';
+  }
+
+  function setMethod(method) {
+    activeMethod = method;
+    const isPrecision = method === 'precision';
+    showEl(isPrecision ? precisionControls : aiControls);
+    hideEl(isPrecision ? aiControls : precisionControls);
+    methodAiBtn.classList.toggle('bg-white', !isPrecision);
+    methodAiBtn.classList.toggle('shadow-sm', !isPrecision);
+    methodAiBtn.classList.toggle('text-brand', !isPrecision);
+    methodAiBtn.classList.toggle('text-zinc-500', isPrecision);
+    methodPrecisionBtn.classList.toggle('bg-white', isPrecision);
+    methodPrecisionBtn.classList.toggle('shadow-sm', isPrecision);
+    methodPrecisionBtn.classList.toggle('text-brand', isPrecision);
+    methodPrecisionBtn.classList.toggle('text-zinc-500', !isPrecision);
+
+    // 如果已經選好一份 Word 檔案，切換處理方式時要跟著把「目前這個
+    // 檔案要送去哪個 tool」重新指過去，不然按下開始轉檔還是會送去
+    // 使用者切換前的那個 tool。
+    if (currentFile && resolveTool(currentFile.name) !== 'document') {
+      applyFileSelection(currentFile);
+    }
+  }
+
+  let currentFile = null;
+
+  function applyFileSelection(file) {
+    currentFile = file;
+    const tool = resolveTool(file.name);
+    const isPdf = tool === 'document';
+
+    showEl(isPdf ? pdfSection : wordSection);
+    hideEl(isPdf ? wordSection : pdfSection);
+
+    filenameEl.textContent = `已選擇：${file.name}（${formatMB(file.size)}）`;
+    showEl(filenameEl);
+
+    // 把按鈕的 data-tool 指到正確的底層 tool，讓 initDropzones() 裡
+    // 通用的「開始轉檔」點擊處理、以及 handleFileCheckResult() 都能
+    // 正確找到這顆按鈕、正確判斷要不要鎖住它。
+    startBtn.dataset.tool = tool;
+    handleFileChosen(tool, file);
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) applyFileSelection(file);
+  });
+
+  dropzone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    dropzone.classList.add('border-brand', 'bg-blue-50/40');
+  });
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('border-brand', 'bg-blue-50/40');
+  });
+  dropzone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropzone.classList.remove('border-brand', 'bg-blue-50/40');
+    const file = event.dataTransfer.files && event.dataTransfer.files[0];
+    if (file) applyFileSelection(file);
+  });
+
+  methodAiBtn.addEventListener('click', () => setMethod('ai'));
+  methodPrecisionBtn.addEventListener('click', () => setMethod('precision'));
+
+  setMethod('ai'); // 預設處理方式
 }
 
 function initAiSettingsPanel() {
@@ -1088,8 +1205,7 @@ function initUiBridge() {
   initToolTabs();
   initDropzones();
   initImageQualitySlider();
-  initDocumentFormatSelectors();
-  initDocumentModeToggle();
+  initUnifiedDocumentPanel();
   initAiSettingsPanel();
   initGithubActionsSettingsPanel();
   initModalButtons();
