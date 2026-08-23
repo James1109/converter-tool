@@ -112,6 +112,50 @@ export async function extractSmartArtTextContent(file) {
 }
 
 /**
+ * interleaveSmartArtIntoHtml(html, diagrams)
+ * -------------------------------------------------------------------------
+ * 把萃取出來的 SmartArt 文字內容「塞回」它在文件裡原本大概的位置，
+ * 而不是全部丟到文件最後面當附錄。
+ *
+ * 【怎麼判斷「原本的位置」】
+ * mammoth.js 完全不認識 SmartArt，遇到 SmartArt 佔用的那個段落時，
+ * 常見情況是只留下一個「幾乎是空的」段落（例如這份文件的
+ * `<p>2.4.1</p>`、`<p>2.4.2</p>` 這種只有編號、沒有任何內文的段落——
+ * 編號本身其實是 SmartArt 前面的標題文字，緊接著的 SmartArt 內容整個
+ * 消失了）。這裡用「依序比對」的方式：文件裡第 N 個「內容短到像是
+ * 只剩編號」的段落，對應第 N 個從 word/diagrams/ 讀出來的 SmartArt
+ * 圖表，把該圖表的文字內容插進那個段落後面。
+ *
+ * 這是「依出現順序」的推測比對，不是精確位置還原（真正精確的位置
+ * 資訊在 mammoth 完全跳過 SmartArt 的當下就已經遺失了，無法逆向找
+ * 回來），但比「全部丟到文件最後」更接近原始文件的閱讀動線，讓 AI
+ * 有機會把這些內容當作「這一節本來就有」的資料來整理，而不是完全
+ * 脫節的附錄。
+ * -------------------------------------------------------------------------
+ */
+export function interleaveSmartArtIntoHtml(html, diagrams) {
+  if (!diagrams || diagrams.length === 0) return html;
+
+  let diagramCursor = 0;
+  // 比對「內容很短、看起來像純編號或純標題、沒有其他敘述文字」的
+  // 段落——用「文字長度 < 20 且不含標點句子」當簡單判斷依據。
+  const shortParaPattern = /<p>([^<]{1,20})<\/p>/g;
+
+  return html.replace(shortParaPattern, (match, innerText) => {
+    if (diagramCursor >= diagrams.length) return match;
+    const trimmed = innerText.trim();
+    // 只處理「純數字編號（可能帶點）」或「很短的標題」這種典型的
+    // SmartArt 標題殘影，避免誤觸真正的一般短句內容。
+    if (!/^[\d.]+$|^.{1,12}$/.test(trimmed)) return match;
+
+    const diagram = diagrams[diagramCursor];
+    diagramCursor += 1;
+    const itemsHtml = diagram.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+    return `${match}<ul data-smartart-source="true">${itemsHtml}</ul>`;
+  });
+}
+
+/**
  * buildSmartArtAppendixHtml(diagrams)
  * -------------------------------------------------------------------------
  * 把 extractSmartArtTextContent() 的結果組成一段「附錄」HTML，附加在
