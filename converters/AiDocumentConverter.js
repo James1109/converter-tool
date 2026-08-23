@@ -30,7 +30,7 @@ import { registerMainThreadTask, clearMainThreadTask } from '../worker-lifecycle
 import { extractDocxHtml } from '../mammoth-extract.js';
 import { renderHtmlToPdfBlob } from '../html-to-pdf-renderer.js';
 import { extractDocxPageSetup } from '../docx-page-setup.js';
-import { countUnsupportedSmartArt, buildSmartArtWarningHtml, extractSmartArtTextContent, buildSmartArtAppendixHtml } from '../docx-content-audit.js';
+import { countUnsupportedSmartArt, buildSmartArtWarningHtml, extractSmartArtTextContent } from '../docx-content-audit.js';
 import { renderAllSmartArtToHtml } from '../docx-smartart-render.js';
 import { detectProviderFromKey } from '../ai-provider-detect.js';
 
@@ -158,6 +158,35 @@ function stripCodeFence(text) {
  * 100% 遵守，程式碼層面的防呆比較可靠）。
  * -------------------------------------------------------------------------
  */
+/**
+ * buildSmartArtSourceTextForAi(diagrams)
+ * -------------------------------------------------------------------------
+ * 把從 SmartArt 圖表抓到的文字節點（見 docx-content-audit.js 的
+ * extractSmartArtTextContent()）組成一段要「混進原始內容一起餵給
+ * AI」的純文字區塊，並附上簡短說明，讓 AI 知道：
+ *   1. 這些內容原本是圖表（組織圖/流程圖），不是一般段落
+ *   2. 條列順序不保證等於圖表上的視覺排列
+ * 這樣 AI 在「完整忠實轉寫」模式下才不會誤把這段補充說明當成必須
+ * 逐字保留的原文，「智慧整理」模式下也才能正確判斷怎麼組織這些內容
+ * （例如組成清單、表格，或融入摘要）。
+ * -------------------------------------------------------------------------
+ */
+function buildSmartArtSourceTextForAi(diagrams) {
+  if (!diagrams || diagrams.length === 0) return '';
+
+  const sections = diagrams
+    .map((diagram, i) => `【圖表 ${i + 1}】\n${diagram.items.join('\n')}`)
+    .join('\n\n');
+
+  return `
+
+<div data-smartart-source="true">
+以下是原始文件中以 SmartArt 圖表（組織圖/流程圖等）呈現的內容，圖形本身已無法重現，僅保留其中的文字節點；條列順序不保證等於原始圖表上的視覺排列方式：
+
+${sections}
+</div>`;
+}
+
 function stripLeadingTrailingBlankBlocks(html) {
   const isBlankBlock = /^\s*<(p|div)[^>]*>\s*(&nbsp;|<br\s*\/?>)*\s*<\/\1>\s*/i;
   const isLoneBr = /^\s*<br\s*\/?>\s*/i;
@@ -376,24 +405,34 @@ async function runPipeline(file, provider, apiKey, mode, options) {
     throw new Error('無法從此 Word 文件解析出任何內容，檔案可能已損毀或為空白文件。');
   }
 
+  // ⭐ 讓 AI 真的「看得到」SmartArt 圖表裡的內容，而不是處理完才把
+  // 原始條列清單貼在後面 ⭐
+  // 有些文件（例如整份都是組織圖/流程圖的規格書）大部分真正有意義
+  // 的內容其實都寫在 SmartArt 裡，mammoth.js 抓不到 SmartArt，導致
+  // 餵給 AI 的內容幾乎是空的——AI 再怎麼「整理」也生不出東西，摘要
+  // 只能寫得很空洞。這裡先把 SmartArt 裡的文字抓出來，混進要餵給
+  // AI 的原始內容裡，讓 AI 有真正的資料可以整理、摘要、重新組織，
+  // 而不是事後貼一段沒經過任何處理的原始清單。
+  emitProgress(15, '正在檢查 SmartArt 圖表內容...');
+  const smartArtCount = await countUnsupportedSmartArt(file);
+  const smartArtDiagrams = smartArtCount > 0 ? await extractSmartArtTextContent(file) : [];
+  const smartArtSourceBlock = buildSmartArtSourceTextForAi(smartArtDiagrams);
+  const sourceHtmlForAi = sourceHtml + smartArtSourceBlock;
+
   emitProgress(30, `正在組合提示詞（${mode === 'lossless' ? '完整忠實轉寫' : mode === 'polish' ? 'AI 智慧整理' : '自訂提示詞'}）...`);
   const prompt =
     mode === 'custom'
-      ? MODE_PROMPTS.custom(sourceHtml, options.customPrompt)
-      : MODE_PROMPTS[mode](sourceHtml);
+      ? MODE_PROMPTS.custom(sourceHtmlForAi, options.customPrompt)
+      : MODE_PROMPTS[mode](sourceHtmlForAi);
 
   emitProgress(45, `正在呼叫 ${PROVIDERS[provider].label} API 處理中，請稍候...`);
   const aiHtmlRaw = await callAiProvider(provider, apiKey, prompt, mode, activeAbortController.signal);
   const aiHtmlBody = stripLeadingTrailingBlankBlocks(aiHtmlRaw);
 
-  // 檢查是否有 mammoth.js 無法轉換的 SmartArt 圖表。刻意不把這段警告
-  // 一起丟給 AI 處理（尤其「完整忠實轉寫」模式會被要求逐字保留，AI
-  // 可能誤把警告文字當成必須原樣保留的文件內容），而是等 AI 處理完
-  // 之後才把警告跟「SmartArt 文字內容附錄」插在最終結果的前後。
-  const smartArtCount = await countUnsupportedSmartArt(file);
-  const smartArtDiagrams = smartArtCount > 0 ? await extractSmartArtTextContent(file) : [];
-  const aiHtml =
-    buildSmartArtWarningHtml(smartArtCount) + aiHtmlBody + buildSmartArtAppendixHtml(smartArtDiagrams);
+  // 警告banner 還是不丟給 AI（避免「完整忠實轉寫」模式誤把警告文字
+  // 當成必須逐字保留的文件內容），單純插在最終結果最前面，讓使用者
+  // 知道「圖形本身」還是無法重現，只有文字被還原進來了。
+  const aiHtml = buildSmartArtWarningHtml(smartArtCount) + aiHtmlBody;
 
   const baseName = file.name.replace(/\.docx?$/i, '');
   const outputFormat = options.outputFormat === 'html' ? 'html' : 'pdf';
