@@ -30,7 +30,7 @@ import { registerMainThreadTask, clearMainThreadTask } from '../worker-lifecycle
 import { extractDocxHtml } from '../mammoth-extract.js';
 import { renderHtmlToPdfBlob } from '../html-to-pdf-renderer.js';
 import { extractDocxPageSetup } from '../docx-page-setup.js';
-import { countUnsupportedSmartArt, buildSmartArtWarningHtml } from '../docx-content-audit.js';
+import { countUnsupportedSmartArt, buildSmartArtWarningHtml, extractSmartArtTextContent, buildSmartArtAppendixHtml } from '../docx-content-audit.js';
 import { renderAllSmartArtToHtml } from '../docx-smartart-render.js';
 import { detectProviderFromKey } from '../ai-provider-detect.js';
 
