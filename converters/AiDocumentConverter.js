@@ -261,6 +261,19 @@ async function callAiProvider(provider, apiKey, prompt, mode, signal) {
 
   if (!response.ok) {
     const errBody = await response.text().catch(() => '');
+    if (response.status === 429 && /tokens per min|rate_limit_exceeded/i.test(errBody)) {
+      // ⭐ 針對「文件太長，單次請求的 token 數超過帳號的每分鐘上限
+      // （TPM）」給出明確、可行動的錯誤訊息，而不是通用的「額度不足」
+      // ——這兩者的成因跟解法完全不同：一般 429 常見於帳號真的沒額度
+      // 了，但這裡實測遇到的是「這一次請求本身就超過每分鐘上限」
+      // （例如 gpt-4o-mini 免費帳號常見上限 200,000 TPM，但一份長文件
+      // 加上處理指令，一次請求就要求了超過 100 萬 token，遠遠超過
+      // 上限），換句話說「即使等到下一分鐘再試，同一份文件還是會
+      // 立刻再次超過上限」，重試沒有用，必須換方法。
+      throw new Error(
+        '文件內容過長，單次請求的 token 數超過你的 OpenAI 帳號每分鐘上限（TPM），不是額度用完，重新嘗試也不會成功。建議：(1) 改用 Google Gemini（TPM 上限通常高很多），或 (2) 把文件拆成較短的段落分次處理，或 (3) 到 OpenAI 後台申請提高該模型的 TPM 上限。'
+      );
+    }
     throw new Error(`OpenAI API 呼叫失敗（HTTP ${response.status}）：請確認 API Key 是否正確或額度是否足夠。${errBody ? ' ' + errBody.slice(0, 200) : ''}`);
   }
 
